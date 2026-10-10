@@ -787,6 +787,19 @@ extern "C" REX_FUNC(__imp__XMsgInProcessCall) {
     const uint32_t length_ptr = Load32(GuestPtr(base, in[2] + 24));
     if (length_ptr) Store32(GuestPtr(base, length_ptr), 0);
   }
+  // XMPGetPlaybackController (music player app 0xFA, message 0x7001B; buffer: client,
+  // controller*, locked*): no controller, not locked, as the SDK answers, but without the
+  // SDK's 10 ms sleep on threads other than the main thread (meant for a game that polls it
+  // in a tight loop). Reach's AUDIO thread asks during every frame (about 20 ms of sleeps)
+  // and the main thread waits for it, which held the game to 45 fps (docs/framerate.md).
+  if (in[0] == 0xFA && in[1] == 0x7001B && in[2]) {
+    const uint32_t controller_ptr = Load32(GuestPtr(base, in[2] + 4));
+    const uint32_t locked_ptr = Load32(GuestPtr(base, in[2] + 8));
+    if (controller_ptr) Store32(GuestPtr(base, controller_ptr), 0);
+    if (locked_ptr) Store32(GuestPtr(base, locked_ptr), 0);
+    ctx.r3.u64 = 0;  // X_E_SUCCESS
+    return;
+  }
   const uint32_t result = Handle(base, in[0], in[1], in[2], in[3]);
   if (result != kNotOurs) {
     ctx.r3.u64 = result;

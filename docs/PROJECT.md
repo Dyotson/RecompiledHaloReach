@@ -344,6 +344,18 @@ Check exact param names in `endpoints.json` before calling.
   - Not XAM: the frame loop's wait in `sub_820E40F0` (docs/framerate.md) is an
     NtWaitForSingleObjectEx on a render hand-off event (via 0x826129A8/0x820CCF70), not an
     XAM task or overlapped; the signaller is the guest RENDER thread (`sub_820CA090` loop).
+    (Correction, below: it is set by the guest AUDIO thread.)
+
+- 2026-10-10: **45 fps floor removed; `frame_rate = 60`.** At a 120 Hz guest vblank every
+  scene ran 45-46 fps (21.8 ms) with all threads mostly waiting. The guest AUDIO thread asks
+  the music player app for XMPGetPlaybackController during every frame, and the SDK answers
+  it after a 10 ms sleep on any non-main thread (a Xenia throttle for another game); the main
+  and render threads wait for AUDIO each frame. `live_xmsg.cpp` answers it without the sleep:
+  the title screen and a SWAT game run 60.0 fps (p50 16.8 ms) at a 120 Hz vblank, ~235 fps
+  with `--vsync=false`, and still exactly 30 fps by default. `frame_rate = 60` sets the guest
+  vblank to 120 Hz, because the render thread's schedule is in vblanks too (a hook on the
+  limiter alone left the screen at 30 fps). Found with the new `REACH_SYNCTRACE`
+  (`src/debug/sync_trace.cpp`). Details and the limits for 144 fps: `docs/framerate.md`.
 
 ## Debugging recipes
 
@@ -388,6 +400,9 @@ Check exact param names in `endpoints.json` before calling.
 - Frame rate and stutter: `tools/bench.sh menu|gameplay [--cold]`, or `RECOMP_PERF=1` in any
   run (`docs/perf.md`). Measure only with no other game running (it prints `CONTENDED`
   otherwise).
+- Who waits on whom: `REACH_SYNCTRACE=FILE`, then `touch FILE.trigger`: 3 s of every guest
+  kernel wait and signal with thread, handle, duration and guest call stack
+  (`src/debug/sync_trace.cpp`, analysis in `docs/framerate.md`).
 - Frame dumps without screenshots: `REACH_FRAMEDUMP=20,28` + `--vulkan_readback_resolve=true`, then
   `tools/frame_to_png.py`. Texture binding trace: `REACH_TEXTRACE=1`. Live guest memory: `tools/guestmem.py`.
   `--gpu_allow_invalid_fetch_constants=true` silences thousands of fetch-constant warnings.

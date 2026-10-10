@@ -1,7 +1,8 @@
 # Frame rate above 30 fps: investigation
 
-Status: investigation and proposal, nothing changed in the game yet. Addresses are in
-`default.xex` (base version); `docs/perf.md` explains the measurements.
+Status: the 45 fps floor is fixed (a 10 ms sleep in the SDK's music player app, below), and
+`frame_rate = 60` in `reach.toml` (or `--frame_rate=60`) runs the game at 60 fps. Addresses are
+in `default.xex` (base version); `docs/perf.md` explains the measurements.
 
 ## How Reach paces itself
 
@@ -75,10 +76,85 @@ on a sync object in `sub_820E40F0` (called from `Main_FrameLoopStep` via `sub_82
 RENDER either waited on an event in `sub_820CCFD8` (6) or spun in `sub_820CA090`'s loop
 that polls for the main thread's next frame packet for up to 66 ms (5); the GPU command
 processor thread was idle in 10 of 12. So the frame is bounded by a fixed hand-off or
-synchronization latency, not by work. Not yet checked: who signals the object `sub_820E40F0`
-waits on (table `0x8394F304`, index at `0x82BE4D94`), our critical sections
-(`REACH_SDK_CRITICAL_SECTIONS=1`), and sleep/timer granularity in the waits the SDK runs
-(the GPU command processor sleeps while polling `WAIT_REG_MEM`).
+synchronization latency, not by work.
+
+## The 45 fps floor: a sleep in XMPGetPlaybackController (fixed)
+
+`REACH_SYNCTRACE` (`src/debug/sync_trace.cpp`, see below) timed every kernel wait and
+signal for 3 s on the title screen at a 120 Hz vblank (46.0 fps):
+
+- MAIN_THREAD waited 88% of the time, 19.4 ms per frame, on the event in `sub_820E40F0`
+  (handle F8000050). It was set each time by the guest thread named **AUDIO** (entry near
+  `0x8242AB0C`, call site `0x8243FB88`), not by RENDER.
+- RENDER waited 43%: 9.3 ms per frame on semaphores F8000070/74 at the end of its frame
+  (`sub_8244C018`, the frame packet's semaphore), released by the same AUDIO thread
+  (`0x82432898`).
+- AUDIO itself waited only 7% (1.5 ms per frame, for MAIN_THREAD's per-frame kick, event
+  F800004C set at `0x8220F074`). eu-stack samples of it: 12 of 12 in
+  `rex::thread::Sleep` ← `XmpApp::DispatchMessageSync` ← `XMsgInProcessCall`.
+
+The SDK answers XMPGetPlaybackController (music player app 0xFA, message 0x7001B) after
+`Sleep(10 ms)` on any thread but the main thread, a throttle Xenia added for a game that
+calls it in a tight loop (`kernel/xam/apps/xmp_app.cpp`). Reach's AUDIO thread calls it
+during every frame (about 20 ms of sleeps), and MAIN_THREAD and RENDER wait for that thread,
+so every frame took at least ~21.8 ms. At the console's 60 Hz the 2-vblank limiter (33.3 ms)
+hid it. `live_xmsg.cpp` now answers the message itself (no controller, not locked, as the SDK
+does) without the sleep; no SDK change.
+
+After the fix, at a 120 Hz vblank the main thread waits 86% of the time on the vblank event
+in the limiter (`0x820E1E58`) and AUDIO 99% for its kick: the limiter is the only cap.
+
+| Run (contended, windowed) | before | after |
+| --- | --- | --- |
+| title screen, 120 Hz vblank | 45.9 fps, p50 21.8 ms, p99 22.1 | 60.0 fps, p50 16.8, p99 16.9 |
+| SWAT on Sword Base, turning, `frame_rate = 60` | 45.1 fps, p50 22.2 (clean, above) | 60.0 fps, p50 16.8, p99 17.4-17.9 |
+| title screen, `--vsync=false` (1 kHz vblank) | 45.7 fps, p50 21.8 | ~235 fps, p50 4.2, p95 4.8 |
+| title screen, defaults | 30.0 fps, p50 33.6 | 30.0 fps, p50 33.6 |
+
+The SWAT game clock ran 31 s in 30.5 s of real time at 60 fps.
+
+## How a frame is scheduled in vblanks
+
+The limiter is one of several places that count vblanks:
+
+- `Main_FrameLoopStep` (`0x820E1D18`): waits until the vblank counter is 2 (or 3) past the
+  count saved after the previous frame (above).
+- `sub_820F09D0`, first thing in the game update (`sub_82440410`): waits for at least one
+  vblank since the last update, sets the frame time to (vblanks since the last update) /
+  refresh rate (the video mode's), and stores the vblank this frame is to be shown at: the
+  update's vblank + 4 with the render thread (+2 without) at `*(*(r13) + 324) + 32`.
+- RENDER, `sub_820E19E0` (from `0x821F9B5C`): waits until a flip happened since its last
+  frame (`0x8319F814`, the flip count D3D's vblank interrupt hands the game's vblank callback
+  `sub_8223C5C0`) and until the vblank counter reaches that target - 2.
+- D3D queues each swap's flip for the vblank at least its presentation interval after the
+  last flip (`sub_826C83B0`); Reach's swaps carry interval 1 (0x10A).
+
+Halving only the limiter (a hook that moved the saved count back one vblank) made
+MAIN_THREAD loop at 60 Hz, but it handed RENDER a frame only on every second loop (the
+frame packet copy in `sub_820E1B60` ran 30 times a second), so the screen stayed at 30 fps;
+moving the render target back 2 vblanks as well changed nothing. Which check skips the render
+was not traced. Raising the vblank rate instead scales all of these together, and the frame
+time stays right because it divides by the video mode's refresh rate.
+
+## The frame_rate setting
+
+`frame_rate = 60` (`src/main.cpp`; 30 is the default, the setting needs a restart) makes
+the guest vblank 120 Hz (`video_mode_refresh_rate`, which `VdQueryVideoMode` reports and the
+SDK's VSync thread follows), unless `video_mode_refresh_rate` is set explicitly. Checked:
+title screen and menus 60 fps, a SWAT game at 60 fps with the clock at real-time speed, and
+the intro video, which presents every vblank (120 fps) but still ends at 46 s like at 60 Hz.
+Not yet checked: the campaign, Firefight and network games (the clock sync's extra vblank for
+a client running ahead becomes 8.3 ms instead of 16.7 ms), and what still moves at 30 Hz.
+
+Beyond 60: the SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`), so
+this scheme tops out at 120 fps, and its VSync thread checks for due vblanks every 1 ms, so
+each vblank comes up to 1 ms late (p50 33.6 ms rather than 33.3 at 30 fps). 144 fps needs a
+288 Hz vblank (an SDK change) or a frame pacing that is not tied to whole vblanks.
+
+**`REACH_SYNCTRACE=FILE`** records the guest's kernel waits and signals (thread, handle,
+duration, guest call stack) for `REACH_SYNCTRACE_SECS` seconds (default 3) after
+`touch FILE.trigger`, and marks each VdSwap. It is how the sleep above was found: per
+thread, the longest waits and the thread that signalled each one show the critical path.
 
 ## Options
 
@@ -105,13 +181,11 @@ network clock sync's extra vblank, or a higher guest vblank rate). Since the cam
 effects already update per frame, turning and looking around get 60 fps or more; objects
 that only move on ticks still step at 30 Hz. No gameplay
 or network change, as ticks are untouched. Cost: about twice the CPU and GPU work per second,
-so the port has to hold 60 fps first: today something caps it at ~46 fps (above).
+so the port has to hold 60 fps first (it does now: the title screen runs ~235 fps with the
+limiter off). Done as `frame_rate = 60` through the vblank rate (above): a hook on the limiter
+alone does not raise the frame rate.
 
-**Proposal:** find and remove the ~22 ms synchronization floor first (next steps: trace who
-signals the `sub_820E40F0` wait object, time the guest's waits with a hook on
-`sub_820CCF70`, try `REACH_SDK_CRITICAL_SECTIONS=1`). Then (c), behind a setting
-(`frame_rate = 30 | 60 | unlocked`, default 30 until it is validated), as a hook on the
-limiter rather than the vblank rate (the vblank also paces the intro video, which presented
-111 frames a second at a 120 Hz vblank). Validate the campaign, Firefight and a Reach Live
-match at 60. Then measure what still looks like 30 Hz (objects, the first-person weapon) and
-decide whether (b) is worth it, starting with the objects closest to the camera.
+**Next:** validate the campaign, Firefight and a Reach Live match at `frame_rate = 60`, with
+clean measurements. Then measure what still looks like 30 Hz (objects, the first-person
+weapon) and decide whether (b) is worth it, starting with the objects closest to the camera.
+For 144 fps, see the limits under "The frame_rate setting".

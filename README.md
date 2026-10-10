@@ -141,6 +141,9 @@ tools/play.sh --resolution_scale=2   # render at 2304x1440 instead of 1152x720
 
 - **Vsync** is on (no tearing); `vulkan_allow_present_mode_immediate = true` in `reach.toml`
   turns it off, `vulkan_allow_present_mode_mailbox = true` picks mailbox ([`docs/perf.md`](docs/perf.md)).
+- **Frame rate:** `frame_rate = 60` in `reach.toml` runs the game at 60 fps instead of the
+  console's 30; the simulation stays at 30 ticks a second. Checked on the menus and in a custom
+  game so far ([`docs/framerate.md`](docs/framerate.md)).
 - **Saves** (profile, Credits, Armory, maps, films) are in `~/.local/share/reach/`; the log
   is `~/.local/share/reach/reach.log`.
 - Skip the intro video with Esc (Start); in menus Enter is A and Backspace is B.

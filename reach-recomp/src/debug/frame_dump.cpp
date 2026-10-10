@@ -30,6 +30,7 @@
 
 #include "../platform/guest_memory.h"
 #include "frame_stats.h"
+#include "sync_trace.h"
 #include "../platform/sdk_import.h"
 
 #include <rex/logging.h>
@@ -259,6 +260,7 @@ extern "C" REX_FUNC(__imp__VdSwap) {
   MaybeTriggerRenderDocCapture(elapsed);
   MaybeInvalidatePhysicalMemory(elapsed);
   reach::perf::OnGuestFrame();
+  reach::synctrace::Mark(ctx, base, "VdSwap");
   Schedule& schedule = GetSchedule();
   static const char* dump_trigger = std::getenv("REACH_FRAMEDUMP_TRIGGER");
   static int dump_polls = 0;

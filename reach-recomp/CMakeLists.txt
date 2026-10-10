@@ -71,6 +71,7 @@ set(REACH_SOURCES
     src/debug/frame_dump.cpp
     src/debug/frame_stats.cpp
     src/debug/gamestate_trace.cpp
+    src/debug/sync_trace.cpp
     src/debug/texture_trace.cpp
     src/hooks/mouse_look.cpp
     src/hooks/offline_challenges.cpp
