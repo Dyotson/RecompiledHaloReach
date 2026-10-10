@@ -1,0 +1,140 @@
+diff --git a/src/codegen/builders/vector.cpp b/src/codegen/builders/vector.cpp
+index 2e0070a..e5cb05c 100644
+--- a/src/codegen/builders/vector.cpp
++++ b/src/codegen/builders/vector.cpp
+@@ -183,24 +183,53 @@ bool build_vlogefp(BuilderContext& ctx) {
+ // Vector Dot Products
+ //=============================================================================
+ 
++// Xenon's dot products return QNaN where the sum of finite inputs overflows; dpps gives an
++// infinity there (or NaN, when products overflow both ways). The dpps result is kept when it
++// is finite, which is one well-predicted branch on its exponent. Otherwise the sum is redone
++// as Xenia's x64 backend does (DOT_PRODUCT_3/4): float64 products and sums in its order,
++// (x + z) + y or (x + z) + (y + w), rounded to float32; a float32 overflow of that finite sum
++// is QNaN 0x7FC00000, and an infinity or NaN that came from the inputs is kept. Host lanes
++// 3..0 hold the guest's x, y, z, w.
++static void emit_dot_product(BuilderContext& ctx, const char* mask, bool four) {
++  auto vD = ctx.v(ctx.insn.operands[0]);
++  auto vA = ctx.v(ctx.insn.operands[1]);
++  auto vB = ctx.v(ctx.insn.operands[2]);
++  ctx.emit_set_flush_mode(true);
++  ctx.println("\t{{");
++  ctx.println(
++      "\t\tsimde__m128 d = simde_mm_dp_ps(simde_mm_load_ps({}.f32), simde_mm_load_ps({}.f32), "
++      "{});",
++      vA, vB, mask);
++  ctx.println(
++      "\t\tif ((uint32_t(simde_mm_cvtsi128_si32(simde_mm_castps_si128(d))) << 1) >= "
++      "0xFF000000u) [[unlikely]] {{");
++  ctx.println("\t\t\tdouble s = double({0}.f32[3]) * {1}.f32[3] + double({0}.f32[1]) * {1}.f32[1];",
++              vA, vB);
++  if (four) {
++    ctx.println("\t\t\ts += double({0}.f32[2]) * {1}.f32[2] + double({0}.f32[0]) * {1}.f32[0];", vA,
++                vB);
++  } else {
++    ctx.println("\t\t\ts += double({0}.f32[2]) * {1}.f32[2];", vA, vB);
++  }
++  ctx.println("\t\t\tfloat f = float(s);");
++  ctx.println(
++      "\t\t\td = std::isinf(f) && std::isfinite(s) ? "
++      "simde_mm_castsi128_ps(simde_mm_set1_epi32(0x7FC00000)) : simde_mm_set1_ps(f);");
++  ctx.println("\t\t}}");
++  ctx.println("\t\tsimde_mm_store_ps({}.f32, d);", vD);
++  ctx.println("\t}}");
++}
++
+ bool build_vmsum3fp128(BuilderContext& ctx) {
+   // 3-element dot product accounting for guest->host vector element reversal
+   // 0xEF = dot(yzw) with result broadcast to all elements (see constants doc)
+-  ctx.emit_set_flush_mode(true);
+-  ctx.println(
+-      "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
+-      "simde_mm_load_ps({}.f32), 0xEF));",
+-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
++  emit_dot_product(ctx, "0xEF", false);
+   return true;
+ }
+ 
+ bool build_vmsum4fp128(BuilderContext& ctx) {
+   // 4-element dot product: 0xFF = all 4 elements, result to all (see constants doc)
+-  ctx.emit_set_flush_mode(true);
+-  ctx.println(
+-      "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
+-      "simde_mm_load_ps({}.f32), 0xFF));",
+-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
++  emit_dot_product(ctx, "0xFF", true);
+   return true;
+ }
+ 
+diff --git a/tests/ppc/asm/instr_vmsum3fp128.s b/tests/ppc/asm/instr_vmsum3fp128.s
+index f88cf8a..8f11007 100644
+--- a/tests/ppc/asm/instr_vmsum3fp128.s
++++ b/tests/ppc/asm/instr_vmsum3fp128.s
+@@ -8,3 +8,31 @@ test_vmsum3fp128_1:
+   #_ REGISTER_OUT v3 [3f800000, 3fc00000, 3f8ccccd, 01020304]
+   #_ REGISTER_OUT v4 [40000000, 40700000, 4013d70a, 01020304]
+   #_ REGISTER_OUT v5 [4122A7F0, 4122A7F0, 4122A7F0, 4122A7F0]
++
++test_vmsum3fp128_2:
++  # |(-FLT_MAX, -FLT_MAX, -FLT_MAX)|^2 overflows float32: QNaN, not infinity
++  #_ REGISTER_IN v3 [ff7fffff, ff7fffff, ff7fffff, 00000000]
++  vmsum3fp128 v5, v3, v3
++  blr
++  #_ REGISTER_OUT v3 [ff7fffff, ff7fffff, ff7fffff, 00000000]
++  #_ REGISTER_OUT v5 [7fc00000, 7fc00000, 7fc00000, 7fc00000]
++
++test_vmsum3fp128_3:
++  # an infinite input gives infinity
++  #_ REGISTER_IN v3 [7f800000, 3f800000, 3f800000, 00000000]
++  #_ REGISTER_IN v4 [3f800000, 3f800000, 3f800000, 00000000]
++  vmsum3fp128 v5, v3, v4
++  blr
++  #_ REGISTER_OUT v3 [7f800000, 3f800000, 3f800000, 00000000]
++  #_ REGISTER_OUT v4 [3f800000, 3f800000, 3f800000, 00000000]
++  #_ REGISTER_OUT v5 [7f800000, 7f800000, 7f800000, 7f800000]
++
++test_vmsum3fp128_4:
++  # 1e20 * 1e20 - 1e20 * 1e20: the products overflow float32 but cancel, and w is ignored
++  #_ REGISTER_IN v3 [60ad78ec, 60ad78ec, 00000000, 7f800000]
++  #_ REGISTER_IN v4 [60ad78ec, e0ad78ec, 00000000, 7f800000]
++  vmsum3fp128 v5, v3, v4
++  blr
++  #_ REGISTER_OUT v3 [60ad78ec, 60ad78ec, 00000000, 7f800000]
++  #_ REGISTER_OUT v4 [60ad78ec, e0ad78ec, 00000000, 7f800000]
++  #_ REGISTER_OUT v5 [00000000, 00000000, 00000000, 00000000]
+diff --git a/tests/ppc/asm/instr_vmsum4fp128.s b/tests/ppc/asm/instr_vmsum4fp128.s
+index 4243dd0..d7474ee 100644
+--- a/tests/ppc/asm/instr_vmsum4fp128.s
++++ b/tests/ppc/asm/instr_vmsum4fp128.s
+@@ -6,3 +6,31 @@ test_vmsum4fp128_1:
+   #_ REGISTER_OUT v3 [3f800000, 3fc00000, 3f8ccccd, 3ff33333]
+   #_ REGISTER_OUT v4 [40000000, 40700000, 4013d70a, 40b051eb]
+   #_ REGISTER_OUT v5 [41A5147B, 41A5147B, 41A5147B, 41A5147B]
++
++test_vmsum4fp128_2:
++  # |(-FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX)|^2 overflows float32: QNaN, not infinity
++  #_ REGISTER_IN v3 [ff7fffff, ff7fffff, ff7fffff, ff7fffff]
++  vmsum4fp128 v5, v3, v3
++  blr
++  #_ REGISTER_OUT v3 [ff7fffff, ff7fffff, ff7fffff, ff7fffff]
++  #_ REGISTER_OUT v5 [7fc00000, 7fc00000, 7fc00000, 7fc00000]
++
++test_vmsum4fp128_3:
++  # an infinite input gives infinity
++  #_ REGISTER_IN v3 [7f800000, 3f800000, 3f800000, 3f800000]
++  #_ REGISTER_IN v4 [3f800000, 3f800000, 3f800000, 3f800000]
++  vmsum4fp128 v5, v3, v4
++  blr
++  #_ REGISTER_OUT v3 [7f800000, 3f800000, 3f800000, 3f800000]
++  #_ REGISTER_OUT v4 [3f800000, 3f800000, 3f800000, 3f800000]
++  #_ REGISTER_OUT v5 [7f800000, 7f800000, 7f800000, 7f800000]
++
++test_vmsum4fp128_4:
++  # 1e20 * 1e20 - 1e20 * 1e20: the products overflow float32 but cancel
++  #_ REGISTER_IN v3 [60ad78ec, 00000000, 60ad78ec, 3f800000]
++  #_ REGISTER_IN v4 [60ad78ec, 00000000, e0ad78ec, 3f800000]
++  vmsum4fp128 v5, v3, v4
++  blr
++  #_ REGISTER_OUT v3 [60ad78ec, 00000000, 60ad78ec, 3f800000]
++  #_ REGISTER_OUT v4 [60ad78ec, 00000000, e0ad78ec, 3f800000]
++  #_ REGISTER_OUT v5 [3f800000, 3f800000, 3f800000, 3f800000]

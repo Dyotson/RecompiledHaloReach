@@ -4,8 +4,9 @@ The ReXGlue SDK's Xenos GPU emulation is a port of Xenia from around early Decem
 (nightly 0.10.0.24, commit `bd833a2`). Upstream does not accept Xenos GPU changes
 (rexglue/rexglue-sdk#456), so fixes live in `patches/rexglue-sdk/` and
 `tools/build_rexglue_sdk.sh` builds a patched `librexgpu-xenos.so` from them (see
-`docs/PROJECT.md` > Tooling). Most of them are Xenia fixes the SDK never got; a few are
-porting slips. Every patch says "as in Xenia" in its comments and was checked against
+`docs/PROJECT.md` > Tooling). One patch (0025) is in the CPU code generator instead: the
+script also builds a patched `rexglue`, and the reach build runs codegen with it. Most of
+them are Xenia fixes the SDK never got; a few are porting slips. Every patch says "as in Xenia" in its comments and was checked against
 Xenia Canary `82d0cd1f4`, the build we use as the reference.
 
 | Patch | Area | What was wrong | Visible effect in Reach |
@@ -29,6 +30,7 @@ Xenia Canary `82d0cd1f4`, the build we use as the reference.
 | 0020 | VIZ queries | `PA_SC_VIZ_QUERY_STATUS` bits were set ("visible") at every VIZ_QUERY end and never cleared; Xenia leaves the register alone. Also logs each query's begin/end at debug instead of info level (Reach issues dozens per frame: over 1000 log lines a second in play) | none seen; much smaller logs |
 | 0021 | SPIR-V vertex position | A vertex position with W = 0 is clipped on the host; on the Xenos X/W and Y/W go to infinity and a rectangle drawn with clipping disabled covers the target. Now W = 1 and X, Y = ±2^16 (Xenia has the same gap) | Spartan missing from the Armory preview and the post-game/PROMOTED screens. **Fixed.** |
 | 0022 | Vulkan occlusion queries | Host occlusion queries were switched off for good at the first query, because D3D's begin and end reports sit at different addresses and the SDK expected one; every query then returned the fake 1000 samples ("visible"). Reports are now snapshots of a running sample counter, as on the Xenos, written without waiting for the GPU: a guess (the query's last real result, zero included, as Xenia's "fast-alt") is rewritten with the real value when the GPU has finished | Reach issued its adaptive-tessellation water every frame (the draw that hangs the GPU) because the visibility test behind it always passed. **Fixed:** the draw is no longer issued in Forge or the campaign |
+| 0025 | Codegen: `vmsum3fp128`/`vmsum4fp128` | The dot products ran SSE `dpps`, which gives +/-infinity (or NaN) when the sum of finite inputs overflows float32. Xenon gives QNaN `0x7FC00000`, as Xenia emulates (`DOT_PRODUCT_3/4`). Reported upstream as rexglue/rexglue-sdk#491 | none seen in Reach; in Forza Horizon the collision GJK's first termination test relied on it, and free roam crashed about half the time |
 
 `experimental/0014` (tessellated triangle strips/fans as lists) is not applied; see its
 README.
@@ -129,6 +131,30 @@ Open GPU issues in the campaign (Winter Contingency):
 - The SDK's D3D12 backend needs the same midpoint decode (Xenia has it in
   `d3d12_render_target_cache.cc`) before Windows builds, and its DXBC translator the W = 0
   handling of 0021.
+
+## Dot products: overflow is QNaN (0025)
+
+Xenia's x64 backend (`DOT_PRODUCT_3`/`DOT_PRODUCT_4` in `x64_sequences.cc`, Canary
+`82d0cd1`) multiplies and adds in float64, in the order (x + z) + y, or (x + z) + (y + w),
+and rounds the sum to float32. If that float32 has an all-ones exponent while the float64 sum
+is finite (finite inputs whose dot product overflows), the result is QNaN `0x7FC00000` in all
+four lanes. An infinity or NaN that came from the inputs passes through.
+
+The codegen keeps `dpps` and adds one branch on the exponent of its result (an `extractps`,
+an `add` and a fused compare-and-jump, never taken in practice). Only a non-finite result
+takes the cold path, which redoes the sum as Xenia does, so every non-finite case matches
+Xenia: overflow gives QNaN, products that overflow float32 but cancel give Xenia's finite
+float64 sum, and inputs with infinities or NaNs keep them. What remains different: a finite
+`dpps` result can differ from the float64 sum in the last bit (Xenia keeps float64 because
+it matches the console more often), and a sum within half an ulp of FLT_MAX could round to
+FLT_MAX in float32 where float64 overflows. Accumulating every dot product in float64
+cost 11% (vmsum3fp128) and 54% (vmsum4fp128) more latency than `dpps` plus the check in a
+dependent chain on the Ryzen 7 7800X3D, at the same throughput, and would change the last
+bit of ordinary results everywhere; it was left out.
+
+The patch also adds cases to the SDK's PPC tests (`tests/ppc/asm/instr_vmsum3fp128.s`,
+`instr_vmsum4fp128.s`): an overflow, an infinite input, and products that overflow but
+cancel.
 
 ## Runtime fixes outside the patches
 

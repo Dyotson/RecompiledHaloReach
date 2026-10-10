@@ -36,6 +36,11 @@ MCC install (READ ONLY): `/home/dyotson/.local/share/Steam/steamapps/common/Halo
   build copies it next to the binary after each link (`REACH_XENOS_PLUGIN`). Building the SDK on this
   immutable host uses Homebrew's X11/XCB/Wayland headers (see the script). Upstream will not take GPU
   fixes, so further Xenos fixes go into `patches/rexglue-sdk/` too.
+- **Patched codegen tool:** the same script builds `rexglue` (patch 0025: Xenon's dot products
+  give QNaN on overflow, rexglue-sdk#491) into the overlay's `bin/`, and the reach build runs
+  codegen with it (`REACH_REXGLUE`). When the tool changes, the script deletes the
+  `generated/*/codegen.stamp` files, since codegen's fingerprint covers only its inputs, and the
+  next build regenerates everything.
 - Clang 23 / CMake / Ninja from Homebrew: `/home/linuxbrew/.linuxbrew/bin`.
 - JDK 21: `/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec`.
 - Build: `cmake -S reach-recomp -B reach-recomp/out/build/linux-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=/home/linuxbrew/.linuxbrew/bin/clang++ -DCMAKE_PREFIX_PATH=$HOME/rexglue-sdk/linux-amd64` then `ninja -C reach-recomp/out/build/linux-release`.

@@ -98,13 +98,15 @@ cd -
 # 2. The game files, extracted from your disc image (the image is only read)
 python3 tools/xdvdfs_extract.py "/path/to/Halo - Reach.iso" extract extracted/xbox360
 
-# 3. The patched Xenos GPU plugin: clones the SDK source to ~/rexglue-sdk-src, applies
-#    patches/rexglue-sdk/ and installs an overlay at ~/rexglue-sdk-patched (the stock
-#    plugin renders the menus black and lacks this project's 22 rendering fixes)
+# 3. The patched Xenos GPU plugin and codegen tool: clones the SDK source to
+#    ~/rexglue-sdk-src, applies patches/rexglue-sdk/ and installs an overlay at
+#    ~/rexglue-sdk-patched (the stock plugin renders the menus black and lacks this
+#    project's 22 rendering fixes; the stock rexglue's dot products differ from Xenon's)
 tools/build_rexglue_sdk.sh
 
-# 4. Configure and build. The first configure runs codegen on your default.xex (the
-#    recompiled C++ goes to reach-recomp/generated/, a few minutes); the build compiles it.
+# 4. Configure and build. The first configure runs codegen on your default.xex with the
+#    overlay's rexglue (the recompiled C++ goes to reach-recomp/generated/, a few
+#    minutes); the build compiles it.
 cmake -S reach-recomp -B reach-recomp/out/build/linux-nightly -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_PREFIX_PATH=$HOME/rexglue-sdk-nightly/0.10.0.24/linux-amd64

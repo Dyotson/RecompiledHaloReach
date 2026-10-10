@@ -6,7 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${1:-$HOME/DecompiledHaloReach-generated}"
 MAIN="$(git -C "$ROOT" rev-parse --short HEAD)"
-SDK="$("${REXSDK:-$HOME/rexglue-sdk-nightly/0.10.0.24/linux-amd64}/bin/rexglue" --version 2>/dev/null | head -1)"
+# Codegen runs the patched overlay's rexglue (tools/build_rexglue_sdk.sh).
+SDK="$("${REXSDK:-$HOME/rexglue-sdk-patched/0.10.0.24/linux-amd64}/bin/rexglue" --version 2>/dev/null | head -1) + SDK patches"
 
 [ -d "$DEST/.git" ] || { echo "no git checkout at $DEST" >&2; exit 1; }
 [ "$(gh repo view "$(git -C "$DEST" remote get-url origin)" --json visibility -q .visibility)" = PRIVATE ] \
