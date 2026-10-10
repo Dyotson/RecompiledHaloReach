@@ -150,7 +150,8 @@ it matches the console more often), and a sum within half an ulp of FLT_MAX coul
 FLT_MAX in float32 where float64 overflows. Accumulating every dot product in float64
 cost 11% (vmsum3fp128) and 54% (vmsum4fp128) more latency than `dpps` plus the check in a
 dependent chain on the Ryzen 7 7800X3D, at the same throughput, and would change the last
-bit of ordinary results everywhere; it was left out.
+bit of ordinary results everywhere; it was left out. In the games the patch costs nothing
+measurable: the same frame times and CPU use before and after (`docs/perf.md`).
 
 The patch also adds cases to the SDK's PPC tests (`tests/ppc/asm/instr_vmsum3fp128.s`,
 `instr_vmsum4fp128.s`): an overflow, an infinite input, and products that overflow but

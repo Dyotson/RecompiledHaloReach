@@ -139,6 +139,14 @@ GPU's busy percentage.
 | 2026-10-10 | cb092d4 | menu | warm | IMMEDIATE | 30.0 | 33.6 | 33.7 | 33.8 | 33.8 | 29.6 | 0 | 0 | 100.0 | 0 | 30 | 175 | 23 |
 | 2026-10-10 | cb092d4 | gameplay (SWAT, Sword Base) | warm | FIFO | 30.0 | 33.6 | 33.7 | 33.8 | 34.1 | 29.5 | 0 | 0 | 100.0 | 2 | 30 | 149 | 38 |
 | 2026-10-10 | cb092d4 | gameplay (SWAT, Sword Base) | cold | FIFO | 29.9 | 33.6 | 33.7 | 34.0 | 62.7 | 24.1 | 0 | 0 | 99.6 | 31 | 30 | 152 | 37 |
+| 2026-10-10 | build before 0025 | menu | warm | FIFO | 30.0 | 33.7 | 33.7 | 33.8 | 34.3 | 29.5 | 0 | 0 | 100.0 | 0 | 30.0 | 177 | 23 |
+| 2026-10-10 | b0954ba (patch 0025) | menu | warm | FIFO | 30.0 | 33.6 | 33.7 | 33.8 | 33.9 | 29.6 | 0 | 0 | 100.0 | 0 | 30.0 | 175 | 23 |
+| 2026-10-10 | build before 0025 | gameplay (SWAT, Sword Base) | warm | FIFO | 30.0 | 33.7 | 33.7 | 33.8 | 66.1 | 26.7 | 0 | 0 | 99.9 | 0 | 30.0 | 153 | 40 |
+| 2026-10-10 | b0954ba (patch 0025) | gameplay (SWAT, Sword Base) | warm | FIFO | 30.0 | 33.6 | 33.7 | 33.8 | 67.4 | 26.6 | 1 | 0 | 99.9 | 2 | 29.9 | 153 | 45 |
+
+- Patch 0025 (dot products give QNaN on overflow, one predicted branch per `vmsum3fp128`/
+  `vmsum4fp128`) against the build just before it, in one reserved window: no measurable cost
+  (same frame times, same CPU use).
 
 - The game itself keeps 30.0 fps in every mode on an idle machine. Vsync costs it nothing;
   dropping the nonstop repaints frees about a quarter of the GPU and 0.5-0.6 of a CPU core.
