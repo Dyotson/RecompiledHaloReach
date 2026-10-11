@@ -1,0 +1,16 @@
+diff --git a/src/kernel/xam/apps/xmp_app.cpp b/src/kernel/xam/apps/xmp_app.cpp
+index a5e9088..35b4b7a 100644
+--- a/src/kernel/xam/apps/xmp_app.cpp
++++ b/src/kernel/xam/apps/xmp_app.cpp
+@@ -408,11 +408,6 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
+       memory::store_and_swap<uint32_t>(memory_->TranslateVirtual(args->controller_ptr), 0);
+       memory::store_and_swap<uint32_t>(memory_->TranslateVirtual(args->locked_ptr), 0);
+ 
+-      if (!XThread::GetCurrentThread()->main_thread()) {
+-        // Atrain spawns a thread 82437FD0 to call this in a tight loop forever.
+-        rex::thread::Sleep(std::chrono::milliseconds(10));
+-      }
+-
+       return X_E_SUCCESS;
+     }
+     case 0x00070029: {

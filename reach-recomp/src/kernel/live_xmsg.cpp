@@ -783,7 +783,8 @@ extern "C" REX_FUNC(__imp__XMsgInProcessCall) {
   // finds there on as the count; a leftover 0xBEBEBEBE read as "a full buffer", so the
   // enumeration never moved to the next device and Firefight spun in it forever at
   // "Readying map".
-  if (in[0] == 0xFE && in[1] == 0x2000E && in[2]) {
+  static const bool sdk_xam = std::getenv("REACH_SDK_XMSG") != nullptr;  // use the SDK's answers
+  if (in[0] == 0xFE && in[1] == 0x2000E && in[2] && !sdk_xam) {
     const uint32_t length_ptr = Load32(GuestPtr(base, in[2] + 24));
     if (length_ptr) Store32(GuestPtr(base, length_ptr), 0);
   }
@@ -792,7 +793,7 @@ extern "C" REX_FUNC(__imp__XMsgInProcessCall) {
   // SDK's 10 ms sleep on threads other than the main thread (meant for a game that polls it
   // in a tight loop). Reach's AUDIO thread asks during every frame (about 20 ms of sleeps)
   // and the main thread waits for it, which held the game to 45 fps (docs/framerate.md).
-  if (in[0] == 0xFA && in[1] == 0x7001B && in[2]) {
+  if (in[0] == 0xFA && in[1] == 0x7001B && in[2] && !sdk_xam) {
     const uint32_t controller_ptr = Load32(GuestPtr(base, in[2] + 4));
     const uint32_t locked_ptr = Load32(GuestPtr(base, in[2] + 8));
     if (controller_ptr) Store32(GuestPtr(base, controller_ptr), 0);

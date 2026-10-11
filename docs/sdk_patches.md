@@ -5,7 +5,7 @@ The ReXGlue SDK's Xenos GPU emulation is a port of Xenia from around early Decem
 (rexglue/rexglue-sdk#456), so fixes live in `patches/rexglue-sdk/` and
 `tools/build_rexglue_sdk.sh` builds a patched `librexgpu-xenos.so` from them (see
 `docs/PROJECT.md` > Tooling). One patch (0025) is in the CPU code generator instead: the
-script also builds a patched `rexglue`, and the reach build runs codegen with it. Most of
+script also builds a patched `rexglue` (and, for the XAM/kernel patches 0026-0027, a patched `librexruntime.so`), and the reach build runs codegen with it. Most of
 them are Xenia fixes the SDK never got; a few are porting slips. Every patch says "as in Xenia" in its comments and was checked against
 Xenia Canary `82d0cd1f4`, the build we use as the reference.
 
@@ -31,6 +31,8 @@ Xenia Canary `82d0cd1f4`, the build we use as the reference.
 | 0021 | SPIR-V vertex position | A vertex position with W = 0 is clipped on the host; on the Xenos X/W and Y/W go to infinity and a rectangle drawn with clipping disabled covers the target. Now W = 1 and X, Y = ±2^16 (Xenia has the same gap) | Spartan missing from the Armory preview and the post-game/PROMOTED screens. **Fixed.** |
 | 0022 | Vulkan occlusion queries | Host occlusion queries were switched off for good at the first query, because D3D's begin and end reports sit at different addresses and the SDK expected one; every query then returned the fake 1000 samples ("visible"). Reports are now snapshots of a running sample counter, as on the Xenos, written without waiting for the GPU: a guess (the query's last real result, zero included, as Xenia's "fast-alt") is rewritten with the real value when the GPU has finished | Reach issued its adaptive-tessellation water every frame (the draw that hangs the GPU) because the visibility test behind it always passed. **Fixed:** the draw is no longer issued in Forge or the campaign |
 | 0025 | Codegen: `vmsum3fp128`/`vmsum4fp128` | The dot products ran SSE `dpps`, which gives +/-infinity (or NaN) when the sum of finite inputs overflows float32. Xenon gives QNaN `0x7FC00000`, as Xenia emulates (`DOT_PRODUCT_3/4`). Reported upstream as rexglue/rexglue-sdk#491 | none seen in Reach; in Forza Horizon the collision GJK's first termination test relied on it, and free roam crashed about half the time |
+| 0026 | Kernel/XAM: `ObDereferenceObject`, `XamApp` 0x2000E, `XamTaskSchedule` | `ObDereferenceObject` on an `XEnumerator` found its object through a handle the enumerator's own fields overwrite and released an unrelated object; the content-aggregate enumeration did not write the item count on NO_MORE_FILES; `XamTaskSchedule` never released the task thread's handle. Branch `fix/xam-enumerators` in the upstream clone | Firefight froze while loading a mission. Reach's own overrides (`object_refs.cpp`, `live_xmsg.cpp`) still work around it for stock SDKs; with `REACH_SDK_OBJECT_REFS=1 REACH_SDK_XMSG=1` and this patch, Firefight loads fine (the task message block leak is not covered) |
+| 0027 | Kernel/XAM: `XMPGetPlaybackController` | 10 ms sleep before answering on non-main threads (Xenia's throttle) | held the game to 45 fps; with `REACH_SDK_XMSG=1` and this patch the title screen runs 59.9 fps at `frame_rate = 60`. Branch `fix/xmp-playback-sleep` |
 
 `experimental/0014` (tessellated triangle strips/fans as lists) is not applied; see its
 README.

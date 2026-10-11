@@ -1,0 +1,80 @@
+diff --git a/src/kernel/xam/apps/xam_app.cpp b/src/kernel/xam/apps/xam_app.cpp
+index 7f10ece..d7674f9 100644
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -60,11 +60,12 @@ X_HRESULT XamApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
+       uint32_t item_count = 0;
+       auto result = e->WriteItems(data->buffer_ptr, buffer, &item_count);
+ 
++      // The caller reads the count whatever the result, so always write it.
++      if (data->length_ptr) {
++        auto length_ptr = memory_->TranslateVirtual<be<uint32_t>*>(data->length_ptr);
++        *length_ptr = (result == X_ERROR_SUCCESS && item_count >= 1) ? 1 : 0;
++      }
+       if (result == X_ERROR_SUCCESS && item_count >= 1) {
+-        if (data->length_ptr) {
+-          auto length_ptr = memory_->TranslateVirtual<be<uint32_t>*>(data->length_ptr);
+-          *length_ptr = 1;
+-        }
+         return X_E_SUCCESS;
+       }
+       return X_E_NO_MORE_FILES;
+diff --git a/src/kernel/xam/xam_task.cpp b/src/kernel/xam/xam_task.cpp
+index e0e7dab..ecca53d 100644
+--- a/src/kernel/xam/xam_task.cpp
++++ b/src/kernel/xam/xam_task.cpp
+@@ -66,6 +66,10 @@ u32 XamTaskSchedule_entry(mapped_void callback, ppc_ptr_t<XTASK_MESSAGE> message
+     return result;
+   }
+ 
++  // The guest only gets a dummy task handle, so nothing else will release the handle that
++  // Create() took. The thread keeps its own reference until it exits.
++  thread->ReleaseHandle();
++
+   REXKRNL_DEBUG("XAM task ({:08X}) scheduled asynchronously", callback.guest_address());
+ 
+   return X_STATUS_SUCCESS;
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+index 5709e6d..2f9ca9a 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+@@ -161,8 +161,23 @@ u32 ObDereferenceObject_entry(u32 native_ptr) {
+     return 0;
+   }
+ 
+-  auto object = XObject::GetNativeObject<XObject>(
+-      REX_KERNEL_STATE(), REX_KERNEL_MEMORY()->TranslateVirtual(native_ptr));
++  // Objects allocated by XObject::CreateNative keep their handle in the header in front of
++  // them. Some have no dispatch header (enumerators), so the handle stashed in the body is
++  // not reliable for those: it may be overwritten by the object's own fields.
++  object_ref<XObject> object;
++  // (Not for an object at the start of a page: the header would be on the previous one.)
++  if ((native_ptr & 0xFFF) >= sizeof(X_OBJECT_HEADER)) {
++    auto header = REX_KERNEL_MEMORY()->TranslateVirtual<X_OBJECT_HEADER*>(native_ptr -
++                                                                          sizeof(X_OBJECT_HEADER));
++    object = REX_KERNEL_OBJECTS()->LookupObject<XObject>(header->unk_04);
++    if (object && object->guest_object() != native_ptr) {
++      object.reset();
++    }
++  }
++  if (!object) {
++    object = XObject::GetNativeObject<XObject>(REX_KERNEL_STATE(),
++                                               REX_KERNEL_MEMORY()->TranslateVirtual(native_ptr));
++  }
+   if (object) {
+     object->ReleaseHandle();
+   }
+diff --git a/src/system/xobject.cpp b/src/system/xobject.cpp
+index d358f39..55c597e 100644
+--- a/src/system/xobject.cpp
++++ b/src/system/xobject.cpp
+@@ -335,6 +335,9 @@ uint8_t* XObject::CreateNative(uint32_t size) {
+   SetNativePointer(mem + sizeof(X_OBJECT_HEADER), true);
+ 
+   auto header = memory()->TranslateVirtual<X_OBJECT_HEADER*>(mem);
++  // Objects without a dispatch header (enumerators) have no room in their body for the
++  // handle; ObDereferenceObject finds them through this.
++  header->unk_04 = handle();
+ 
+   auto object_type = memory()->SystemHeapAlloc(sizeof(X_OBJECT_TYPE));
+   if (object_type) {

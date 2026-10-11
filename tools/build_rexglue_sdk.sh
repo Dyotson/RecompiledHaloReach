@@ -74,7 +74,7 @@ if [ -d "$BREW/opt/xorgproto/include" ]; then
                  "-DCMAKE_SHARED_LINKER_FLAGS=-L$BREW/lib")
 fi
 ( cd "$SRC" && cmake --preset linux-amd64 "${cmake_args[@]}" > /dev/null )
-cmake --build "$SRC/out/build/linux-amd64" --config Release --target rexgpu-xenos rexglue \
+cmake --build "$SRC/out/build/linux-amd64" --config Release --target rexgpu-xenos rexglue rexruntime \
     --parallel "$(nproc)"
 
 built="$SRC/out/linux-amd64/Release/librexgpu-xenos.so"
@@ -94,6 +94,18 @@ done
 rm -f "$OVERLAY/lib/librexgpu-xenos.so"
 cp "$built" "$OVERLAY/lib/librexgpu-xenos.so"
 echo "patched plugin: $OVERLAY/lib/librexgpu-xenos.so"
+
+# The runtime (patches 0026, 0027: XAM/kernel fixes). Same commit as the nightly's, so it is
+# a drop-in; give it the nightly's RUNPATH (its own is the build tree's).
+runtime_new="$OVERLAY/lib/.librexruntime.new"
+cp "$SRC/out/linux-amd64/Release/librexruntime.so" "$runtime_new"
+rpath_script="$(mktemp)"
+printf 'file(RPATH_SET FILE "%s" NEW_RPATH "$ORIGIN:$ORIGIN/../lib")\n' "$runtime_new" > "$rpath_script"
+cmake -P "$rpath_script"
+rm -f "$rpath_script"
+rm -f "$OVERLAY/lib/librexruntime.so"
+mv "$runtime_new" "$OVERLAY/lib/librexruntime.so"
+echo "patched runtime: $OVERLAY/lib/librexruntime.so"
 
 # The codegen tool: patches change the generated code too (0025: Xenon's dot-product
 # overflow). Older overlays linked bin/ to the nightly's; it is a directory now.
