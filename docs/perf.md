@@ -234,4 +234,29 @@ Not done (bigger changes): the 45,000 vertex uploads a second each end the rende
 copy and a barrier (about 40,000 render pass instances and 100,000 barriers a second), which
 is where most of the driver time goes; replaying the deferred command buffer on another
 thread would take that off the command processor. The SDK's `Audio Worker` thread spins at
-~75% of a core in `PosixConditionBase::WaitMultiple` (runtime).
+~75% of a core in `PosixConditionBase::WaitMultiple` (runtime): fixed by 0033 (below).
+
+## Patch 0033: `WaitMultiple` sleeps until a handle is signalled (2026-10-11)
+
+`PosixConditionBase::WaitMultiple` polled every handle each millisecond; now state changes
+bump a global epoch and multi-handle waits sleep on one condition variable (20 ms cap).
+Validated under gameplay. "Before" is the same runtime without 0033 (for Forza a rebuild
+with 0033 reversed), same game binary, `frame_rate = 60`, Reach headless and Forza windowed,
+on a shared machine (another game ran throughout, so fps differs run to run; the pairs ran
+back to back). Per-thread CPU from `/proc/<pid>/task/*/stat`.
+
+| Scenario | Audio Worker CPU before / after | Frame pacing before / after |
+| --- | --- | --- |
+| Reach campaign (cinematic, then the Falcon) | 75-77% / 1.6-2.2% | opening cinematic 60.0 fps both, p99 17-18 ms both; Falcon seat 41-50 fps both (render-thread bound) |
+| Reach Firefight, 130 s of play (3 pairs) | 71-75% / 2.5-2.7% | 47.9, 53.4, 44.1 / 42.5, 48.3, 54.0 fps (the spread between runs is larger than the difference) |
+| Reach System Link Firefight, 2 instances, ~5 min | not sampled / 1.8% on both | both play in step (same HUD clock), no hang |
+| Forza free roam | 77% / 2.4% | 60.0 / 59.8 fps, p99 20.2 / 20.1 ms |
+| Forza race (GoPro Millennia Masters) | 81% / 3.1% | 58.3 / 59.8 fps, p99 24.3 / 19.4 ms |
+
+Load: the Reach level-load stall (the 460 ms frame) came 76-92 s after launch before and
+78-83 s after (a few runs on both sides were later than the 107 s the run watched, the
+machine was busy): no difference outside the noise. No hangs, no audio errors, no new log
+errors. The faceless Carter and Kat in the campaign briefing show in all these runs, with
+and without 0029-0032 and 0033, so those patches don't cause it (triage 2026-10-11).
+
+Upstream: rexglue/rexglue-sdk issue #500 and PR #501 (branch `perf/wait-multiple-epoch`).
