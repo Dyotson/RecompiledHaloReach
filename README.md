@@ -9,7 +9,9 @@ plus the reverse-engineering notes and tooling needed to get it running.
 > Credits, ranks, the Armory and daily/weekly challenges work without Bungie's servers.
 > Online play goes through a self-hostable **Reach Live** server that stands in for
 > Xbox LIVE and Bungie's services: friends, invites, System Link over the internet and
-> File Share. Matchmaking and Windows builds are not done yet.
+> File Share, plus **matchmaking** on the server's own playlists (with progression), and
+> the game can run at **60 fps** (`frame_rate = 60`). A Windows build is cross-compiled
+> from Linux; it has only been tried under Proton, not on Windows itself.
 
 This repository contains **no game code and no game data**. You need your own copy of
 the game (see [Legal](#legal)).
@@ -50,16 +52,18 @@ the game (see [Legal](#legal)).
 | --- | --- |
 | Codegen of `default.xex` + 4 Waves DLLs | Done (~24k functions, about 167 MB of C++) |
 | Native build (Linux, Clang) | Builds and links |
-| Windows build | Cross-compiled from Linux (`tools/build_windows.sh`); under Proton it plays the intro and reaches the menus with the Vulkan backend. Not yet tried on Windows itself |
+| Windows build | Cross-compiled from Linux (`tools/build_windows.sh`); release builds of both platforms come from CI in the maintainer's private repo (the binaries contain translated game code, so none are published here). Verified only under Proton on Linux: it plays the intro and reaches the menus with the Vulkan backend. Not yet tried on Windows itself |
 | Boot | Kernel init, threads, cache partitions, fibers, RSA signature checks |
 | Intro video | Plays |
 | Title screen and start menu | Render correctly with the patched GPU plugin (the SDK bug behind the black menu is described in `docs/menu_black_screen.md`) |
-| Campaign (Winter Contingency) | Loads, plays the opening and reaches gameplay; rendering matches Xenia after 19 SDK GPU patches ([`docs/sdk_patches.md`](docs/sdk_patches.md)); real occlusion queries, so the game no longer issues the water draw that hangs the GPU |
+| Campaign (Winter Contingency) | Loads, plays the opening and reaches gameplay; rendering matches Xenia after the SDK GPU patches ([`docs/sdk_patches.md`](docs/sdk_patches.md)); real occlusion queries, so the game no longer issues the water draw that hangs the GPU |
 | Firefight, custom games, Theater | Play locally; films of past games play back in Theater |
 | Progression (cR/rank/Armory) | Works offline: cR earned in play, rank-ups, Armory purchases saved in the profile, Spartan preview in the Armory and post-game screens, daily and weekly challenges picked locally each day, counting kills and paying out on completion ([`docs/progression_re.md`](docs/progression_re.md)); with a Reach Live server, progression is also stored server-side |
-| Forge | Works locally: editing on Sword Base, object placement, saving map variants |
-| Online | Over the internet through a self-hosted **Reach Live** server: an emulated Xbox LIVE (friends roster, presence, joining a friend, invites) and System Link (the game's browser lists everyone's games). Tested with up to three players on one machine: Firefight and Slayer through the postgame, host migration. Direct peer-to-peer with NAT hole punching, relayed by the server when that fails ([`docs/online_plan.md`](docs/online_plan.md) section 5). Matchmaking (in progress) and Xbox LIVE party are not available |
+| Forge | Works locally: editing on Sword Base, object placement, saving map variants. Two players through Reach Live (one joins the other's Forge lobby from the roster): both play and switch to edit mode, a placed object shows in the other's budget, and the host saves a map variant. Checked once on Sword Base, two instances on one machine; moving and deleting objects and the System Link browser route were not tried |
+| Online | Over the internet through a self-hosted **Reach Live** server: an emulated Xbox LIVE (friends roster, presence, joining a friend, invites) and System Link (the game's browser lists everyone's games). Tested with up to three players on one machine: Firefight and Slayer through the postgame, host migration. Direct peer-to-peer with NAT hole punching, relayed by the server when that fails ([`docs/online_plan.md`](docs/online_plan.md) section 5). Matchmaking: START MATCHMAKING on a server finds other players on the server's playlists (Free For All, Team Slayer, Capture the Flag, Objective), merges the groups, loads the map and plays, then searches again; the Playlist screen shows player counts and images, and cR/rank progression comes from matchmade games. Tested with two players on one machine; more than two, Arena and the Xbox LIVE party are not available ([`docs/online_plan.md`](docs/online_plan.md) section 5.4) |
 | File share | Through Reach Live: upload maps and game types from the game's File Share UI, browse a friend's share from the roster and download into Local Files ([`docs/online_plan.md`](docs/online_plan.md) section 5.3) |
+| 60 fps | `frame_rate = 60` runs the simulation at 60 ticks a second instead of 30. Checked in the campaign, Firefight, matchmaking and System Link; online, players need the same setting (different ones are kept apart, and mixed co-op fails) ([`docs/framerate.md`](docs/framerate.md)) |
+| GPU emulation speed | SDK patches 0028-0032 cut the cost of the emulated GPU's command processor, memory watches and texture bindings. Measured in Forza Horizon (same SDK): a race went from 41 to 60 fps; Reach runs the same code (see [`docs/perf.md`](docs/perf.md)) |
 | Higher resolution | `resolution_scale = 2` in `reach.toml` (or `--resolution_scale=2`) renders at 2304×1440 instead of 1152×720; menus and Firefight checked, no artifacts seen. Frame rate on a dedicated GPU still to be measured |
 | Keyboard and mouse | On by default next to pads: Halo-style bindings (rebindable `kbm_bind_*` cvars) and raw mouse look fed straight into player control, no stick emulation ([`docs/input.md`](docs/input.md)) |
 

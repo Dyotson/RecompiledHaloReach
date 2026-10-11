@@ -178,6 +178,25 @@ Check exact param names in `endpoints.json` before calling.
       reproduce on the next run.
     - D-pad DOWN is sometimes ignored in menus during FIFO sessions (UP works; menus wrap).
 
+- 2026-10-11: **Forge with two players through Reach Live (one run, Sword Base).** Server on
+  21500/21501, two instances (ForgeHost, ForgeGuest). Host: START, B, A (Main Menu), Forge
+  (3 x DOWN from Matchmaking, A). The roster (RIGHT, DOWN, DOWN on the other instance) lists
+  "In Forge Lobby 1/16"; X joins; the lobby shows 2/18 and the guest waits for the leader.
+  Host START GAME: both load Sword Base and spawn as Spartans (a spawn-in of about 30 s with
+  the frame unchanged, then input works). Edit mode: START menu "Go to Edit Mode" on the host
+  (A) or D-pad UP in game; both show the budget bar. The host placed a weapon (X, A, A, A):
+  budget $1535 -> $1525 on both; the guest placed one: $1515 on both. D-pad UP switched both
+  back to Spartan and edit again. START, DOWN, DOWN, A ("Save As New Map") on the host gave
+  "Save succeeded" and `sandbox.map` under `B13EBABEBABEBABE/4D53085B/00000001/mgal...`.
+  - No hang entering the lobby, no desync seen, both stayed responsive for 9 minutes.
+  - Not tried: moving or deleting an object, seeing the other monitor (the two spawned in
+    different rooms; the placed objects and budget were checked instead), the System Link
+    browser route, a Live party invite (the roster join is the Live path).
+  - Host log: 3,000+ `[error] [gpu] Primitive processor: Unsupported tessellation mode 0 for
+    primitive type 6` and failed PM4_DRAW_INDX with prim_type=6 from the map load on, only on
+    the host (the guest log has none, same scene). Nothing visibly missing. Lead: type-6
+    primitives (quad/rect lists with tess_mode 0) rejected in the SDK's primitive processor.
+
 - 2026-10-09 (night): **no more water draws; System Link discovery works.**
   - SDK patch 0022: real occlusion query results, without stalling the GPU. The SDK had
     switched host queries off at the first query and answered "visible" to all of them, so
