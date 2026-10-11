@@ -406,7 +406,9 @@ Check exact param names in `endpoints.json` before calling.
   their factors and index bounds from the shared memory buffer instead of the system
   constants. That was most likely why the earlier attempt (`experimental/0014`) and the
   water hung the GPU. GPU plugins load from the executable's folder, so `REXSDK` A/B runs
-  never swapped the plugin. Details: `docs/rendering.md`.
+  never swapped the plugin. Details: `docs/rendering.md`. Open there: Falcon "back and forth"
+  check at 60 (one suspicious burst in the formation flight, 30 fps and START-skip runs not
+  done), and faces on/off perf numbers.
 
 ## Debugging recipes
 

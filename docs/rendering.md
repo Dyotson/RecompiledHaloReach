@@ -70,3 +70,29 @@ conclusion that the black faces were older than those patches still holds.
 Lavapipe (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) runs the menus and
 the intro video, but takes more than 10 s per frame in the 3D cinematic. It is too slow to
 check a shot, but safe for anything that could hang the GPU.
+
+## Cutscene "Falcons jumping back and forth" (open, stopped 2026-10-11 at the usage limit)
+
+Done: the opening ran windowed at `frame_rate = 60`, with no input during the cinematics
+(`REACH_GSTRACE=1` plus three bursts of 150 consecutive frame dumps). Every frame ran exactly
+one tick (`frames by ticks 0/1/2/3+: 0/600/0/0` each 10 s). There were only the two normal
+end-of-cinematic reverts (time 13039 -> 5 and 3429 -> 9), no skip and no loop. The Falcon
+takeoff burst and the second flight burst show monotonic motion, with no frame closer to the
+one two back than to the one before.
+
+**Lead:** the burst 2 s into the Falcon formation flight (`burst_350.28.txt`) alternates on
+every frame (d1 = 41, 4, 44, ...): 103 of 150 frames are back-and-forth candidates. Not
+looked at yet. It could be the real "jumping" or a fullscreen effect (a transition flash).
+
+Next:
+- view `m60b/bpng/reach_frame_0350.*` in order;
+- repeat the run at 30 (`motion.sh m30 30`, stopped before it reached the flight) and with
+  `SKIP=1` (START at Jorge's shot) at 60 and 30.
+
+Scripts (session scratchpad `faces/`, may be gone):
+- `motion.sh TAG FR`: run with GSTRACE and the bursts;
+- `burst_motion.py DIR`: the d1/d2 back-and-forth detector;
+- `bench_faces.sh` + `perf_stats.py`: faces on/off perf in the briefing, not run yet (needs
+  BENCH_LOCK).
+
+Run data is in `/var/home/dyotson/faces_r/m60b` (bursts, `reach.log`).
