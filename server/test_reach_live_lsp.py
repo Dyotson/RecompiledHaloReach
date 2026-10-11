@@ -189,5 +189,23 @@ class FileShareTest(unittest.TestCase):
         self.assertEqual(self.items(self.get("/gameapi_omaha/FilesGetCatalog.ashx?&%s" % self.ids)), [])
 
 
+    def test_hopper_statistics(self):
+        """The Playlist screen's player counts: the mmhs file from the published sessions."""
+        path = "/storage/title/4d53085b/tracked/11860/default_hoppers/dynamic_pres_hopper_statistics.bin"
+        record = bytes(0x3C) + bytes([8, 0, 2, 1])      # info, max public/private, filled 2 + 1
+        peers = {1: types.SimpleNamespace(match=(101, record, 0)),
+                 2: types.SimpleNamespace(match=(101, bytes(0x3C) + bytes(4), 0)),  # empty: 1
+                 3: types.SimpleNamespace(match=(103, record, 0)),
+                 4: types.SimpleNamespace()}
+        status, _, body = lsp.handle(types.SimpleNamespace(peers=peers), "GET", path, {}, b"", None)
+        self.assertEqual(status, 200)
+        major, _, payload = lsp.chunks(body)[b"mmhs"]
+        self.assertEqual((major, len(payload)), (4, 0x80E))
+        total, count = struct.unpack_from(">I8xh", payload)
+        self.assertEqual((total, count), (7, 2))
+        self.assertEqual(struct.unpack_from(">BxhI", payload, 0xE), (2, 101, 4))
+        self.assertEqual(struct.unpack_from(">BxhI", payload, 0x16), (2, 103, 3))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -232,6 +232,25 @@ MAP_MANIFEST_SIZE = 0x8004  # `mapm`: u32 count, 128 signatures
 DLC_MANIFEST_SIZE = 0xF504  # `dlcd`
 
 
+STATISTICS_SIZE = 0x80E      # `mmhs` v4 payload, copied as it is to 0x833968D4
+STATISTICS_ENTRIES = 256
+STATISTICS_PATH = "dynamic_pres_hopper_statistics.bin"
+
+
+def hopper_statistics(counts):
+    """The `mmhs` v4 population file the Playlist screen reads (the game's reader is
+    sub_820C8DC0): a raw big-endian struct, u32 total players at +0, 8 bytes of unknown
+    use, i16 entry count at +0xC and from +0xE up to 256 entries of 8 bytes {u8 type,
+    pad, i16 hopper id, u32 players}. A hopper's population is the sum of its type 2
+    entries. `counts` is {hopper id: players}."""
+    entries = sorted((h, n) for h, n in counts.items() if 0 <= h < 0x8000 and n > 0)
+    entries = entries[:STATISTICS_ENTRIES]
+    body = struct.pack(">I8xh", sum(n for _, n in entries), len(entries))
+    for hopper, players in entries:
+        body += struct.pack(">BxhI", 2, hopper, players)
+    return blf(chunk(b"mmhs", 4, 1, body.ljust(STATISTICS_SIZE, b"\0")))
+
+
 def map_signatures(maps_dir):
     """The header signatures of the operator's .map files: a map whose signature the RSA
     manifest does not list marks the console as running modified content."""
@@ -465,6 +484,22 @@ def write(data_dir, salt, maps_dir, network_configuration):
             playlists = json.load(f)
     files = build(salt, map_signatures(maps_dir), network_configuration, playlists,
                   shared_variants(data_dir), map_ids(maps_dir))
+    # Playlist images (the Playlist screen stretches them to a 2.3:1 box, 512x220 fits):
+    # a JPEG named by the playlist's "image" (relative to DATA_DIR) or DATA_DIR/images/<id>.jpg.
+    for h in playlists["playlists"]:
+        if "%05u/game_set_015.bin" % h["id"] not in files:
+            continue
+        image = os.path.join(data_dir, h.get("image") or "images/%d.jpg" % h["id"])
+        if not os.path.isfile(image):
+            if h.get("image"):
+                print("playlist %r: no image file %s" % (h["name"], image), file=sys.stderr)
+            continue
+        with open(image, "rb") as f:
+            jpeg = f.read()
+        if jpeg[:2] != b"\xff\xd8":
+            print("playlist %r: %s is not a JPEG" % (h["name"], image), file=sys.stderr)
+            continue
+        files["%05u/images/hopper.jpg" % h["id"]] = jpeg
     root = os.path.join(data_dir, "storage", HOPPERS_DIR)
     files["manifest_001.bin"] = manifest(salt, {k: v for k, v in files.items()})
     for path, data in files.items():

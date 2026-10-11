@@ -392,7 +392,7 @@ Requests seen after sign-in (main menu, about two minutes):
 | `POST /gameapi_omaha/UserUpdateRewards.ashx?getDailyChallenges=1&userId=&machineId=` | rewards sync: `rpul` v3 (Credits block, Armory flags, purchase log), `chpr` v2 (challenge progress), `loca` | `rpdl` v2 (chunk 0x227: the server's totals block + zero tail). Per-XUID record in `DATA_DIR/players/<xuid>.json`; Credits, counters and flags never go down (max / union), so the game's merge (`new = local + server - uploaded`) restores a reinstalled profile. No `dcha`: every client picks the same challenges from the date. Verified: rewards state 2 ("synced"), and raising the stored Credits to 20,000 made the game adopt them and show "New Armory items" |
 | `POST /ReachPresenceApi/heartbeat.ashx` | `phbt` v5, 0x1BB bytes: in-matchmaking flag, u8 player count, 4 × 0x38 player entries (u64 XUID first), machine id at +0xE2, matchmaking party state from +0xF2 (party list of u64 XUID + u8 at +0xFF, stride 9) | `phbr` v2 (0x93 bytes, all zero). Its fields: +0 u8 flag, +1 u8 per-player flag mask, +2 u32 count, +6 u64 XUID[16] of players reserved for this party (counted by join checks), +0x86 u64, +0x8E u32 (`Function_8232F578`) |
 | `POST /ReachPresenceApi/query.ashx` | `preq` v3: u32, u32 count, u64 XUID[16] of roster players with Bungie presence pending | `pplr` v5 (0x1094: u32 count + 16 records of 0x109 bytes, XUID at +8), sent with count 0. The roster copies a record to its entry +0x15C; the join check reads +0x44 (status), +0x49 max players, +0x4A players, +0x4C (`Function_822CAAC0`). The record layout beyond that is not mapped |
-| `GET /storage/title/4d53085b/tracked/11860/default_hoppers/manifest_001.bin`, `en/rsa_manifest.bin`, `dynamic_pres_hopper_statistics.bin` | matchmaking playlists (11860 is the build) | 404 unless the operator provides the file under `DATA_DIR/storage/<path>` |
+| `GET /storage/title/4d53085b/tracked/11860/default_hoppers/manifest_001.bin`, `en/rsa_manifest.bin`, `dynamic_pres_hopper_statistics.bin` | matchmaking playlists (11860 is the build) | the statistics file is generated per request; the others 404 unless the operator provides the file under `DATA_DIR/storage/<path>` |
 | `GET /storage/user/4d53085b/…/<xuid>/user.bin`, `recent_players.bin`, `/storage/machine/…/machine.bin` | per-player and per-machine files | 404 (a new player has none) |
 | `GET /gameapi_omaha/ArenaGetSeasonStats.ashx`, `UserGetBnetSubscription.ashx`; `POST /upload_server/stats.ashx` | Arena, Bungie Pro, stats upload | 404 |
 
@@ -533,14 +533,14 @@ playlist that picked Oddball on Zealot and then King of the Hill on Sword Base.
 Open:
 - More than two players (needs a third instance, about 26 GB free on this machine).
 - Arena (only the season reply exists).
-- Next steps: serve `dynamic_pres_hopper_statistics.bin` with player counts from the
-  server's presence (decoded at 0x833968D4: total, then {u8 type 2, i16 hopper id, i32
-  count} entries; format of the file not traced yet); optional `%05u/images/hopper.jpg`
-  from the operator; a third instance for 3+ player matches; if the Custom Game fault loop
+- Next steps: a third instance for 3+ player matches; if the Custom Game fault loop
   returns, catch it with gdb (`handle SIGSEGV stop`, filter si_addr = guest 0) and read
   the guest backtrace.
-- The Playlist screen shows no player counts ("CURRENT PLAYERS") and no playlist images
-  (`%05u/images/hopper.jpg`); `dynamic_pres_hopper_statistics.bin` is not served.
+- Arena: needs the season stats the server already answers plus per-playlist ratings
+  (the 30-byte records of `arhs`), the Arena hoppers' `%05u/images/hopper_histogram.jpg`
+  (the rating histogram image, same request class as `hopper.jpg`) and a hopper flagged
+  as an arena one ("arena hopper no longer available" is the string it checks). Not
+  implemented.
 - Once (2026-10-10, with a second instance on the same server), leaving the Matchmaking
   lobby and opening Custom Game made the game fault in a loop (null read of guest address 0
   on the main thread, 0.2 s after pressing A). It did not happen again in six attempts:
@@ -611,10 +611,35 @@ No client change was needed: the manifest itself is not signed (mode 0).
 | `en/matchmaking_banhammer_messages.bin` | `bhms` v1 | optional, not generated |
 | `matchmaking_hopper_027.bin` (required) | `mhcf` v27 | the hopper table, below |
 | `en/matchmaking_hopper_descriptions_003.bin` (required) | `mhdf` v3 | bitstream: count − 1 (6 bits), then per hopper u16 id (16 bits), a flag (1 bit), a NUL-terminated description (8-bit characters, 256 at most) |
-| `dynamic_pres_hopper_statistics.bin` | `mmhs` v4 | optional (population counts), not generated |
+| `dynamic_pres_hopper_statistics.bin` | `mmhs` v4 | Playlist screen player counts, built per request from the server's peers (below) |
 | `en/dynamic_global_nag.bin` | | optional, not generated |
 | `%05u/game_set_015.bin` | `gset` v15 | per hopper, below |
-| `%05u/images/hopper.jpg` | | optional playlist image |
+| `%05u/images/hopper.jpg` | JPEG | playlist image, from `"image"` in `playlists.json` or `DATA_DIR/images/<id>.jpg` (below) |
+
+**Player counts and images on the Playlist screen** (2026-10-10, verified with screenshots).
+The title storage object for `dynamic_pres_hopper_statistics.bin` (constructor `sub_820C95C8`,
+refresh interval 600 s at +0x108, class vtable 0x820017E4, the object's load state at
+0x83395180 must be 1) copies the chunk payload, 0x80E bytes, as it is to 0x833968D4
+(`sub_822E0C60`). Its reader is `sub_820C8DC0(hopper id, out[2])`, used by the Playlist screen
+and the lobby: `out[0]` = the u32 at +0 (total players), and for a hopper id the sum of the u32
+counts of the entries with type 2 and that id. The payload is a raw big-endian struct: u32 total
+at +0, 8 bytes not read there, i16 entry count at +0xC, then up to 256 entries from +0xE of 8
+bytes `{u8 type, pad, i16 hopper id, u32 players}`. `reach_live_hoppers.hopper_statistics()`
+writes it and `reach_live_lsp.hopper_population()` serves it from the server's peers: each peer's
+published matchmaking session counts max(1, filled slots) players for its search key (the
+hopper id); a file at that path in `DATA_DIR/storage` replaces the generated one. The Playlist
+screen then says "N CURRENT PLAYERS" for the highlighted playlist (tested with 3, 5, 21, 7 and 12 from
+a static file; with the generated file the screen said 0, and while one client searched the
+server sent total 1 and 1 for hopper 101). Counts are only as
+fresh as the client's last download. The file is not in the manifest.
+
+Images: `%05u/images/hopper.jpg` is a plain JPEG that the screen stretches to a box of about
+2.3:1 whatever its size (256x128 to 1024x440 all fill it; 512x220 is natural) and draws the
+playlist name over its bottom edge; the Searching screen shows it larger. A missing image
+leaves a dark box (the 404 is remembered until the game restarts). The generator adds
+`"image": "file.jpg"` per playlist (relative to `DATA_DIR`, else `DATA_DIR/images/<id>.jpg`)
+and lists it in the manifest like the other files. The category's own image (`u16 image`
+in the category record) is built into the game.
 
 Bitstreams are read most significant bit first in 64-bit big-endian words. The `mhcf`
 and `gset` payloads are compressed: a 14-bit byte count, then that many bytes: a u32

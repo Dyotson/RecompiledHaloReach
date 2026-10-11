@@ -244,6 +244,27 @@ def stored_file(path):
         return f.read()
 
 
+def hopper_population(server):
+    """The Playlist screen's player counts: the players of every matchmaking session
+    published for a playlist (the search key is the hopper id), from the server's peers.
+    An operator-provided file in storage replaces it."""
+    import reach_live_hoppers
+    stored = stored_file("storage/title/4d53085b/tracked/11860/default_hoppers/"
+                         "dynamic_pres_hopper_statistics.bin")
+    if stored is not None:
+        return stored
+    counts = {}
+    for peer in list(getattr(server, "peers", {}).values()):
+        match = getattr(peer, "match", None)
+        if not match:
+            continue
+        key, record = match[0], match[1]
+        # record: XSESSION_INFO (0x3C), then max public/private, filled public/private slots
+        players = record[0x3E] + record[0x3F] if len(record) > 0x3F else 0
+        counts[key] = counts.get(key, 0) + max(1, players)
+    return reach_live_hoppers.hopper_statistics(counts)
+
+
 def handle(server, method, path, headers, body, peer):
     """Returns (HTTP status, content type, body bytes)."""
     if DUMP:
@@ -265,6 +286,8 @@ def handle(server, method, path, headers, body, peer):
         reply = files.handle(method, route, query, body, blf, chunk, upload, headers)
         if reply is not None:
             return reply
+    if route.endswith("/default_hoppers/dynamic_pres_hopper_statistics.bin") and method == "GET":
+        return 200, "application/octet-stream", hopper_population(server)
     if route.startswith("/storage/") and method == "GET":
         data = stored_file(url.path)
         if data is not None:
