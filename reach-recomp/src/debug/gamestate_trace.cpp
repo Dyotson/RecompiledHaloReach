@@ -15,10 +15,12 @@
 #include <rex/ppc/context.h>
 #include <rex/ppc/func.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <string>
 
 using reach::GuestPtr;
@@ -254,12 +256,19 @@ extern "C" REX_FUNC(sub_820EE150) {
   const uint32_t out = ctx.r5.u32;
   __imp__sub_820EE150(ctx, base);
   if (!Enabled()) return;
+  // Frames by the number of ticks they ran (0, 1, 2, 3 or more): uneven ticks at a steady
+  // frame rate make objects move in steps against a camera that moves every frame.
+  static uint32_t frames_by_ticks[4] = {};
+  const int32_t frame_ticks = out ? static_cast<int32_t>(LoadBE32(GuestPtr(base, out))) : -1;
+  if (frame_ticks >= 0) ++frames_by_ticks[std::min(frame_ticks, 3)];
   static auto last = std::chrono::steady_clock::now();
   const auto now = std::chrono::steady_clock::now();
   if (now - last >= std::chrono::seconds(10)) {
     last = now;
-    REXLOG_INFO("GSTRACE clock time={} rate={} vblank={}", GameTime(base, ctx.r13.u32),
-                TickRate(base, ctx.r13.u32), Vblank(base));
+    REXLOG_INFO("GSTRACE clock time={} rate={} vblank={} frames by ticks 0/1/2/3+: {}/{}/{}/{}",
+                GameTime(base, ctx.r13.u32), TickRate(base, ctx.r13.u32), Vblank(base),
+                frames_by_ticks[0], frames_by_ticks[1], frames_by_ticks[2], frames_by_ticks[3]);
+    std::fill(std::begin(frames_by_ticks), std::end(frames_by_ticks), 0u);
   }
   if (g_frames_after_revert > 0) {
     --g_frames_after_revert;

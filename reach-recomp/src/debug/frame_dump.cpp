@@ -9,6 +9,9 @@
 //
 // REACH_FRAMEDUMP_TRIGGER=<path> also dumps a frame whenever that file appears
 // (it is deleted again), for stepping through menus with REACH_AUTOPRESS_FIFO.
+// REACH_FRAMEDUMP_BURST_TRIGGER=<path> dumps REACH_FRAMEDUMP_BURST (default 60)
+// consecutive frames (reach_frame_<secs>_b<index>) whenever that file appears, to
+// look at motion frame by frame.
 //
 // REACH_SCREENSHOT_TRIGGER=<path> saves the host's output image instead (what the
 // window shows, at the draw resolution scale, e.g. --resolution_scale=2) as
@@ -112,7 +115,8 @@ Schedule& GetSchedule() {
   return schedule;
 }
 
-void DumpFrontBuffer(uint8_t* base, uint32_t fetch_addr, double seconds, const std::string& dir) {
+void DumpFrontBuffer(uint8_t* base, uint32_t fetch_addr, double seconds, const std::string& dir,
+                     int burst_index = -1) {
   // Texture fetch constant (6 big-endian dwords).
   const uint8_t* fetch = GuestPtr(base, fetch_addr);
   uint32_t dw0 = LoadBE32(fetch), dw1 = LoadBE32(fetch + 4), dw2 = LoadBE32(fetch + 8);
@@ -127,7 +131,11 @@ void DumpFrontBuffer(uint8_t* base, uint32_t fetch_addr, double seconds, const s
   size_t bytes = size_t(aligned_width) * aligned_height * 4;
 
   char name[64];
-  std::snprintf(name, sizeof(name), "reach_frame_%07.2f", seconds);
+  if (burst_index >= 0) {
+    std::snprintf(name, sizeof(name), "reach_frame_%07.2f_b%03d", seconds, burst_index);
+  } else {
+    std::snprintf(name, sizeof(name), "reach_frame_%07.2f", seconds);
+  }
   std::string stem = dir + "/" + name;
   // The front buffer constant holds a virtual address in one of the physical
   // mirrors (0xE3044000 for Reach). Read it through that mapping: the 0xE0000000
@@ -267,6 +275,22 @@ extern "C" REX_FUNC(__imp__VdSwap) {
   if (dump_trigger && *dump_trigger && fetch_addr && ++dump_polls % 10 == 0 &&
       std::remove(dump_trigger) == 0) {
     DumpFrontBuffer(base, fetch_addr, elapsed, schedule.dir);
+  }
+  // REACH_FRAMEDUMP_BURST_TRIGGER=<path>: dumps REACH_FRAMEDUMP_BURST (default 60)
+  // consecutive frames whenever that file appears.
+  static const char* burst_trigger = std::getenv("REACH_FRAMEDUMP_BURST_TRIGGER");
+  static const int burst = [] {
+    const char* v = std::getenv("REACH_FRAMEDUMP_BURST");
+    return v ? std::max(1, std::atoi(v)) : 60;
+  }();
+  static int burst_index = -1, burst_polls = 0;
+  if (burst_index < 0 && burst_trigger && *burst_trigger && ++burst_polls % 10 == 0 &&
+      std::remove(burst_trigger) == 0) {
+    burst_index = 0;
+  }
+  if (burst_index >= 0 && fetch_addr) {
+    DumpFrontBuffer(base, fetch_addr, elapsed, schedule.dir, burst_index);
+    burst_index = burst_index + 1 < burst ? burst_index + 1 : -1;
   }
   static const char* shot_trigger = std::getenv("REACH_SCREENSHOT_TRIGGER");
   static int shot_polls = 0;
