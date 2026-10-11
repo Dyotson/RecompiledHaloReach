@@ -15,6 +15,7 @@
 #   REXSDK            SDK prefix (default: the patched overlay, as tools/run_reach.sh).
 # The game runs in the background; stop it with kill -INT on its PID (never pkill -f).
 set -u
+[ $# -ge 1 ] || { echo "usage: $0 DIR [seconds] [extra reach flags...]  (quote paths: the repo path has spaces)" >&2; exit 2; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="$(mkdir -p "$1" && cd "$1" && pwd)"
 SECS="${2:-1800}"
