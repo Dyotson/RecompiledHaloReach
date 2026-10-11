@@ -22,6 +22,10 @@
 // Here game_reverted also counts the rest of the 30 Hz tick the revert happened in (round(tick
 // rate / 30) ticks). At 30 ticks a second it is unchanged. The game reads 0x83597B00 nowhere
 // else but in its checkpoint serialization.
+//
+// Each machine takes the tick rate from its own display, also in network games, so network
+// co-op (campaign and Firefight are synchronous games: every machine runs the same
+// simulation) needs the same frame_rate on every machine (docs/framerate.md).
 
 #include "../platform/guest_memory.h"
 
@@ -73,3 +77,4 @@ extern "C" REX_FUNC(sub_825CD9C0) {
   __imp__sub_825CD9C0(ctx, base);
   StoreBE32(revert_time, static_cast<uint32_t>(reverted_at));
 }
+

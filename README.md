@@ -143,8 +143,10 @@ tools/play.sh --resolution_scale=2   # render at 2304x1440 instead of 1152x720
   turns it off, `vulkan_allow_present_mode_mailbox = true` picks mailbox ([`docs/perf.md`](docs/perf.md)).
 - **Frame rate:** `frame_rate = 60` in `reach.toml` runs the game at 60 fps instead of the
   console's 30. The game ticks at half the display rate, so it then also simulates 60 ticks
-  a second (game time stays real time). Checked on the menus, in a custom game and in the
-  campaign opening ([`docs/framerate.md`](docs/framerate.md)).
+  a second (game time stays real time). Checked in the campaign, Firefight, matchmaking and
+  System Link ([`docs/framerate.md`](docs/framerate.md)). Network co-op (campaign or Firefight
+  over System Link or Reach Live) needs the same `frame_rate` for every player: a 60 fps
+  player with a 30 fps one gets "An error occurred while playing co-op".
 - **Saves** (profile, Credits, Armory, maps, films) are in `~/.local/share/reach/`; the log
   is `~/.local/share/reach/reach.log`.
 - Skip the intro video with Esc (Start); in menus Enter is A and Backspace is B.

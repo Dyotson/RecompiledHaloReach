@@ -155,8 +155,10 @@ the guest vblank 120 Hz (`video_mode_refresh_rate`, which `VdQueryVideoMode` rep
 SDK's VSync thread follows), unless `video_mode_refresh_rate` is set explicitly. The game
 then ticks 60 times a second. Checked: title screen and menus 60 fps, a SWAT game at 60 fps
 with the clock at real-time speed, the intro video, which presents every vblank (120 fps)
-but still ends at 46 s like at 60 Hz, and the campaign opening (below). In network games the
-clock sync's extra vblank for a client running ahead becomes 8.3 ms instead of 16.7 ms.
+but still ends at 46 s like at 60 Hz, the campaign, Firefight, matchmaking and System Link
+(below). In network games the clock sync's extra vblank for a client running ahead becomes
+8.3 ms instead of 16.7 ms. Network co-op (campaign, Firefight) needs every player on the same
+frame rate.
 
 Beyond 60: the SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`), so
 this scheme tops out at 120 fps, and its VSync thread checks for due vblanks every 1 ms, so
@@ -201,8 +203,8 @@ so the port has to hold 60 fps first (it does now: the title screen runs ~235 fp
 limiter off). Done as `frame_rate = 60` through the vblank rate (above): a hook on the limiter
 alone does not raise the frame rate.
 
-**Next:** validate the campaign, Firefight and a Reach Live match at `frame_rate = 60`, with
-clean measurements. Then measure what still looks like 30 Hz (objects, the first-person
+**Next:** find the per-frame update that breaks 60/30 network co-op (below), check how a
+60-tick player looks to a 30-tick one in a multiplayer game, and measure on a clean machine. Then measure what still looks like 30 Hz (objects, the first-person
 weapon) and decide whether (b) is worth it, starting with the objects closest to the camera.
 For 144 fps, see the limits under "The frame_rate setting".
 
@@ -248,5 +250,36 @@ The 30 fps control run is unchanged (no such line; same reverts at the same poin
 `XmaContext 127: There are no bits to copy!` error shows up once in the opening at both 30
 and 60.
 
-Not yet checked at 60: Firefight on Overlook, a matchmade game (60/60 and 60/30), System
-Link, and campaign gameplay after the Falcon beyond the landing.
+**Campaign after the Falcon (60).** Out of the Falcon, walking, turning, firing and reloading the
+assault rifle, "Loading... done", "Checkpoint... done". Game time 600 ticks per 10 s of wall
+time (`REACH_GSTRACE=1` logs `clock time=... rate=...` every 10 s); no other reverts than the
+two cinematic ends. Guest 56 fps over the whole run (contended).
+
+**Firefight, Overlook, Normal, solo (60).** About 2 minutes of play: moving, firing, taking
+damage and recharging shields, the out-of-bounds countdown, a death, the respawn countdown and
+respawning. Game time 600 ticks per 10 s; the HUD clock went from 1:02 to 2:06 between two
+screenshots 67 s apart (each taken about 1 s after its inputs). No audio errors in the log.
+Guest 51.8 fps (contended).
+
+**Matchmaking, own Reach Live server (port 21500), Team Slayer 1v1 on Countdown with the
+1-minute game type.** 60/60: matched in under 40 s, played (the HUD clock went from :18 to :03
+in 14 s), post-game, searched again and were matched into the next game. 60/30: matched, played
+the whole game, both showed the scoreboard and searched again; no errors. In that game each
+machine ran its own tick rate (60 and 30: multiplayer is a distributed game and every machine
+takes the rate from its own display). The two players never met, so how a 60-tick player looks
+to a 30-tick one (movement, hits) is not checked.
+
+**System Link Firefight (co-op).** 60/60 works: both ran 60 ticks with their game times in
+step (8306 and 8300 at the same moment), kills, deaths and loadout respawns for about 2
+minutes. 60/30 failed as the game started, with "GAME ERROR: An error occurred while playing
+co-op" on both: campaign co-op and Firefight are synchronous games (network type sync-server /
+sync-client, options + 4 = 2 / 3, names at 0x82A3A744), which run the same simulation on every
+machine, and the two ran 60 and 30 ticks a second. Forcing 30 ticks in synchronous games
+(the network type in the game globals after `sub_82476568` copies the options in at game
+start) is not enough: both machines then ran 30 ticks with their game times in step (232/233,
+532/534, ...) for about 40 s, and the same error came. So something updated per frame feeds the
+synchronous simulation, which only stays identical when every machine runs one tick per frame
+(30/30 at 30 ticks, 60/60 at 60). That override was dropped (it would also put 60/60 co-op at
+30 ticks, two frames per tick, untested). Network co-op needs the same `frame_rate` on every
+machine; the README says so. Not traced: which per-frame update it is (`sub_82208CC8`, the
+per-frame calls at the end of `sub_82440410` and player input sampling are the candidates).

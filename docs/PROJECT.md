@@ -357,6 +357,16 @@ Check exact param names in `endpoints.json` before calling.
   limiter alone left the screen at 30 fps). Found with the new `REACH_SYNCTRACE`
   (`src/debug/sync_trace.cpp`). Details and the limits for 144 fps: `docs/framerate.md`.
 
+- 2026-10-11: **`frame_rate = 60` is 60 ticks a second; campaign cinematics fixed.** The game
+  sets its tick rate to half the display refresh rate (`sub_82476A60`), so a 120 Hz vblank
+  means 60 ticks. Winter Contingency's opening replayed forever at 60: cinematics end with a
+  scripted revert to the checkpoint `cinematic_skip_start` saved, and the restored script asks
+  `game_reverted` (game time == revert time) one tick too late at 60 ticks.
+  `src/hooks/frame_rate.cpp` widens it to one 30 Hz tick; the campaign now reaches gameplay.
+  Firefight, matchmaking (60/60, 60/30) and System Link co-op at 60/60 checked; network co-op
+  with a 30 fps player errors out ("An error occurred while playing co-op"). `REACH_GSTRACE=1`
+  now logs script reverts with the script's call stack. Details: `docs/framerate.md`.
+
 ## Debugging recipes
 
 - Run: `tools/run_reach.sh <secs> [flags]` (logs `/tmp/reach_run.log`, rotates at 5 MB). It skips
