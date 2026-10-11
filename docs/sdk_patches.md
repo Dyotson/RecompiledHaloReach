@@ -38,6 +38,7 @@ Xenia Canary `82d0cd1f4`, the build we use as the reference.
 | 0030 | `WAIT_REG_MEM` | A failed poll slept 1 ms; the flip waits (a value the guest's vblank interrupt handler changes) now wake right after the vblank interrupt | up to 1 ms less per frame |
 | 0031 | Shared memory | `RequestRanges` allocated a vector and took the global critical region for every vertex and index buffer request, also when every page was already valid (85% of them); now that case is checked without the lock | fewer lock waits |
 | 0032 | Vulkan fetch constants | Rewriting a fetch constant with the value it already has (73% of the fetch dwords a Forza race writes) invalidated the texture bindings, the vertex buffer residency and the fetch constant buffer | 45% fewer texture binding updates |
+| 0033 | Threading (POSIX) | `WaitMultiple` (WaitAny/WaitAll on several handles) polled: it tried to lock every handle and slept 1 ms, over and over, so the Audio Worker (nine handles, mostly idle) used ~75% of a core; it now sleeps on one global condition variable that every signal wakes (20 ms cap as a safety net) | Audio Worker 79% -> 1% of a core (Reach menu), 80% -> 13% (Forza menu) |
 
 `experimental/0014` (tessellated triangle strips/fans as lists) is not applied; see its
 README.
