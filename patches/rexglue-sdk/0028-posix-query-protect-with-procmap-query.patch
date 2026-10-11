@@ -1,0 +1,88 @@
+diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
+index b52bf39..e0a949b 100644
+--- a/src/core/memory_posix.cpp
++++ b/src/core/memory_posix.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+  */
+ 
++#include <atomic>
+ #include <cerrno>
+ #include <cstddef>
+ #include <cstdio>
+@@ -45,6 +46,11 @@
+ #define rex_ftruncate64 ftruncate64
+ #endif
+ 
++#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
++#include <linux/fs.h>  // PROCMAP_QUERY (Linux 6.11+)
++#include <sys/ioctl.h>
++#endif
++
+ #if REX_PLATFORM_ANDROID
+ #include <string.h>
+ 
+@@ -170,9 +176,63 @@ static bool ParseProcMapsLine(const std::string& line, LinuxMapEntry& out) {
+   return out.start < out.end;
+ }
+ 
++#ifdef PROCMAP_QUERY
++// Looks up the mapping containing the address with the PROCMAP_QUERY ioctl
++// (Linux 6.11+): one lookup rather than reading and parsing all of
++// /proc/self/maps, which has thousands of lines once guest memory is watched
++// page by page, and which the access violation handler queries on every write
++// watch fault while holding the global critical region. Returns 1 if found, 0 if
++// the address is not mapped, -1 if the kernel lacks the ioctl.
++static int QueryMapEntry(uintptr_t addr, LinuxMapEntry& out_entry) {
++  static std::atomic<bool> unsupported{false};
++  if (unsupported.load(std::memory_order_relaxed)) {
++    return -1;
++  }
++  // One descriptor per thread: concurrent queries never share one.
++  struct MapsFile {
++    int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
++    ~MapsFile() {
++      if (fd >= 0) {
++        close(fd);
++      }
++    }
++  };
++  thread_local MapsFile maps;
++  if (maps.fd < 0) {
++    return -1;
++  }
++  procmap_query query = {};
++  query.size = sizeof(query);
++  query.query_addr = addr;
++  if (ioctl(maps.fd, PROCMAP_QUERY, &query) != 0) {
++    if (errno == ENOENT) {
++      return 0;
++    }
++    if (errno == ENOTTY) {
++      unsupported.store(true, std::memory_order_relaxed);
++    }
++    return -1;
++  }
++  out_entry = LinuxMapEntry{};
++  out_entry.start = uintptr_t(query.vma_start);
++  out_entry.end = uintptr_t(query.vma_end);
++  out_entry.perms[0] = (query.vma_flags & PROCMAP_QUERY_VMA_READABLE) ? 'r' : '-';
++  out_entry.perms[1] = (query.vma_flags & PROCMAP_QUERY_VMA_WRITABLE) ? 'w' : '-';
++  out_entry.perms[2] = (query.vma_flags & PROCMAP_QUERY_VMA_EXECUTABLE) ? 'x' : '-';
++  out_entry.perms[3] = (query.vma_flags & PROCMAP_QUERY_VMA_SHARED) ? 's' : 'p';
++  return 1;
++}
++#endif  // PROCMAP_QUERY
++
+ // Find the mapping entry in /proc/self/maps that contains the given address
+ static bool FindEntryForAddress(void* address, LinuxMapEntry& out_entry) {
+   const uintptr_t addr = reinterpret_cast<uintptr_t>(address);
++#ifdef PROCMAP_QUERY
++  int queried = QueryMapEntry(addr, out_entry);
++  if (queried >= 0) {
++    return queried != 0;
++  }
++#endif  // PROCMAP_QUERY
+   std::ifstream maps("/proc/self/maps");
+   if (!maps.is_open())
+     return false;

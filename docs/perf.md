@@ -163,3 +163,75 @@ GPU's busy percentage.
 - Runs made earlier on a busy machine (two more Reach instances, each repainting nonstop) are
   not in the table: there the windowed FIFO and MAILBOX runs got only 12-20 presents a second
   in gameplay, because the compositor itself was starved of GPU time.
+
+## GPU emulation speed (SDK patches 0028-0032)
+
+Measured in Forza Horizon (RecompiledForzaHorizon), which shares this SDK and Reach's GPU
+patches: at `frame_rate = 60` its races ran 41-42 fps, bound by the emulated GPU (the guest
+render thread spent ~70% of its time in D3D's `BlockOnFence`, waiting for the command
+processor to reach a fence). The fixes are general: Reach runs the same command processor
+and the same memory watches.
+
+**Profiling without `perf`.** samply refuses to run at `perf_event_paranoid = 2`, but
+user-space sampling of our own processes through `perf_event_open` works there
+(`exclude_kernel`, frame-pointer call chains from the kernel). A small sampler did that
+(scratchpad `gpu-perf/fpprof.c`, with a plugin built with `-fno-omit-frame-pointer
+-gline-tables-only`), plus temporary counters in the plugin and a wall-clock sampler of the
+command processor thread (`/proc/PID/task/TID/{stat,syscall}` and a stack scan through
+`/proc/PID/mem`) for where it waited.
+
+**What the command processor did in a race** (before the patches; ~190,000 draws and 40 M
+register writes a second, 4,600 draws a frame):
+
+- On the CPU 70% of the time. Of that, 30% went to register writes: type-0 packets wrote one
+  register at a time through a virtual call, and each write ran `RegisterFile::GetRegisterInfo`
+  (a switch over every register) only to log unknown registers. Then `IssueDraw` (shared-memory
+  requests for vertex/index buffers 9%, descriptor and constant updates 7.5%, texture bindings
+  5%, render-target state 4%) and replaying the deferred command buffer into Vulkan at each
+  submission (11-15%, mostly in RADV).
+- Off the CPU about a third of the time: half of it waiting for the global critical region in
+  `SharedMemory::RequestRanges` and `MakeRangeValid`, a third in `WAIT_REG_MEM` (the frame
+  flip: a value the guest's vblank interrupt clears), the rest preempted.
+- The lock was held by guest threads in the write-watch fault handler (the CPU writing
+  vertex data the GPU had uploaded: ~45,000 uploads, 260,000 pages a second). For every
+  fault, `MMIOHandler` rechecks the page's protection under that lock with
+  `memory::QueryProtect`, which on Linux read and parsed all of `/proc/self/maps` (~1,800
+  lines once guest memory is watched page by page).
+
+**The patches** (`docs/sdk_patches.md` has the table):
+
+| Patch | Change |
+| --- | --- |
+| 0028 | `QueryProtect`/`Protect` look the mapping up with the `PROCMAP_QUERY` ioctl (Linux 6.11+, ~0.5 µs) instead of parsing `/proc/self/maps`; older kernels keep the parse. In `librexruntime.so` |
+| 0029 | Type-0 packets go to `WriteRegistersFromMem` as a range (the constant blocks are copied in one go); known registers come from a bitmap built once; the Vulkan backend splits mixed ranges instead of a virtual call per register |
+| 0030 | `WAIT_REG_MEM` sleeps on an event set after each guest vblank interrupt instead of a fixed 1 ms, so the flip wait ends as soon as the interrupt handler has run |
+| 0031 | `RequestRanges` reuses its range vector and returns without the global lock when every page is valid already (85% of the requests) |
+| 0032 | Fetch constants rewritten with the same value (73% of the fetch dwords written) no longer invalidate the texture bindings, the vertex buffer residency and the fetch constant buffer |
+
+**Results.** Forza race (GoPro Millennia Masters, throttle held, ~28 s measured), `frame_rate =
+60`, warm caches, windowed, a reserved machine: no other game running and the load average
+under 2 at every start. Same game binary throughout; "runtime" is the nightly
+`librexruntime.so` or one built with 0028. Times in ms.
+
+| Plugin | Runtime | fps | p50 | p95 | p99 | max | 1% low | on target % |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| before | nightly | 41.4 / 42.4 | 24.8 / 24.7 | 29.4 / 30.5 | 32.8 / 33.6 | 50.1 / 53.7 | 26.6 / 26.8 | 15.8 / 23.8 |
+| before | 0028 | 49.3 | 17.8 | 25.9 | 26.8 | 32.4 | 35.8 | 56.7 |
+| 0029-0032 | nightly | 50.3 | 18.4 | 26.2 | 27.8 | 42.1 | 32.7 | 60.2 |
+| 0029-0032 | 0028 | 59.7 / 59.7 | 16.8 / 16.8 | 17.9 / 17.9 | 20.9 / 20.7 | 33.6 / 35.7 | 42.6 / 43.2 | 98.6 / 98.6 |
+
+(two values: two runs.) Frame times snap to the 120 Hz guest vblank (8.3 ms steps): a frame
+the command processor cannot finish in two vblanks takes three, so the race sat at 25 ms
+frames and each fix alone only moved part of the frames back to 16.7 ms. With all of them
+the command processor has slack: off the CPU 14% of the time, nearly all of it in the flip
+wait, and waiting for the global lock 0.2% (was 17%).
+Screenshots of the race menu and of the race match the unpatched build (differences are the
+menu camera's sway and the race timing). In Reach (`tools/bench.sh menu`, Reach's patch set
+with and without 0028-0032, its own runtime with and without 0028) the main menu renders the
+same (mean pixel difference 1/255, only the moving clouds) and holds its 30 fps cap.
+
+Not done (bigger changes): the 45,000 vertex uploads a second each end the render pass for a
+copy and a barrier (about 40,000 render pass instances and 100,000 barriers a second), which
+is where most of the driver time goes; replaying the deferred command buffer on another
+thread would take that off the command processor. The SDK's `Audio Worker` thread spins at
+~75% of a core in `PosixConditionBase::WaitMultiple` (runtime).

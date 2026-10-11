@@ -1,0 +1,38 @@
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index 6953124..422f81d 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -2325,11 +2325,30 @@ void VulkanCommandProcessor::WriteRegistersFromMem(uint32_t start_index, uint32_
+ 
+   if (start_index >= XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 &&
+       end_index <= XE_GPU_REG_SHADER_CONSTANT_FETCH_31_5) {
+-    memory::copy_and_swap(register_file_->values + start_index, base, num_registers);
++    // Games rewrite many fetch constants with the values they already have. The
++    // fetch constant buffer, the texture bindings and the vertex buffer
++    // residency only depend on the values, so invalidate them for the dwords
++    // that change only.
++    uint32_t* values = register_file_->values + start_index;
++    uint32_t first_changed = UINT32_MAX, last_changed = 0;
++    for (uint32_t i = 0; i < num_registers; ++i) {
++      uint32_t value = memory::load_and_swap<uint32_t>(base + i);
++      if (values[i] != value) {
++        values[i] = value;
++        if (first_changed == UINT32_MAX) {
++          first_changed = i;
++        }
++        last_changed = i;
++      }
++    }
++    if (first_changed == UINT32_MAX) {
++      return;
++    }
+     current_constant_buffers_up_to_date_ &=
+         ~(UINT32_C(1) << SpirvShaderTranslator::kConstantBufferFetch);
+-    uint32_t first_fetch_dword = start_index - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+-    uint32_t last_fetch_dword = end_index - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
++    uint32_t first_fetch_dword =
++        start_index + first_changed - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
++    uint32_t last_fetch_dword = start_index + last_changed - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+     if (texture_cache_) {
+       texture_cache_->TextureFetchConstantsWritten(first_fetch_dword / 6, last_fetch_dword / 6);
+     }

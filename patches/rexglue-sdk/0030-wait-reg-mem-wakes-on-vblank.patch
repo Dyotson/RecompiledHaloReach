@@ -1,0 +1,64 @@
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index da8e432..198de7a 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -86,6 +86,8 @@ class CommandProcessor {
+ 
+   uint32_t counter() const { return counter_; }
+   void increment_counter() { counter_++; }
++  // Called after the guest's vblank interrupt handler has run.
++  void OnVblankDispatched() { vblank_event_->Set(); }
+ 
+   Shader* active_vertex_shader() const { return active_vertex_shader_; }
+   Shader* active_pixel_shader() const { return active_pixel_shader_; }
+@@ -253,6 +255,9 @@ class CommandProcessor {
+   uint32_t read_ptr_writeback_ptr_ = 0;
+ 
+   std::unique_ptr<rex::thread::Event> write_ptr_index_event_;
++  // Set after each guest vblank interrupt: WAIT_REG_MEM sleeps on it, so a value
++  // the interrupt handler changes (the swap and flip waits) ends the wait at once.
++  std::unique_ptr<rex::thread::Event> vblank_event_;
+   std::atomic<uint32_t> write_ptr_index_;
+ 
+   // Some titles submit writes beyond the emulated register file range in PM4
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index 8f1cf11..8effb75 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -110,8 +110,10 @@ CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
+       register_file_(graphics_system_->register_file()),
+       worker_running_(true),
+       write_ptr_index_event_(rex::thread::Event::CreateAutoResetEvent(false)),
++      vblank_event_(rex::thread::Event::CreateAutoResetEvent(false)),
+       write_ptr_index_(0) {
+   assert_not_null(write_ptr_index_event_);
++  assert_not_null(vblank_event_);
+ }
+ 
+ CommandProcessor::~CommandProcessor() = default;
+@@ -1065,7 +1067,10 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reade
+           // User wants it fast and dangerous.
+           rex::thread::MaybeYield();
+         } else {
+-          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));
++          // Sleep, but wake up after a guest vblank interrupt: games wait here
++          // for values their interrupt handler changes (the frame flip), and a
++          // full sleep added up to a millisecond to every such wait.
++          rex::thread::Wait(vblank_event_.get(), false, std::chrono::milliseconds(wait / 0x100));
+         }
+         rex::thread::SyncMemory();
+         ReturnFromWait();
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index 8f2fcb0..65c3613 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -329,6 +329,9 @@ void GraphicsSystem::MarkVblank() {
+   //     something wrong and the CP will block waiting for code that
+   //     needs to be run in the interrupt.
+   DispatchInterruptCallback(0, 2);
++  if (command_processor_) {
++    command_processor_->OnVblankDispatched();
++  }
+ }
+ 
+ void GraphicsSystem::ClearCaches() {

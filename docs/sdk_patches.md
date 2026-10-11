@@ -5,7 +5,7 @@ The ReXGlue SDK's Xenos GPU emulation is a port of Xenia from around early Decem
 (rexglue/rexglue-sdk#456), so fixes live in `patches/rexglue-sdk/` and
 `tools/build_rexglue_sdk.sh` builds a patched `librexgpu-xenos.so` from them (see
 `docs/PROJECT.md` > Tooling). One patch (0025) is in the CPU code generator instead: the
-script also builds a patched `rexglue` (and, for the XAM/kernel patches 0026-0027, a patched `librexruntime.so`), and the reach build runs codegen with it. Most of
+script also builds a patched `rexglue` (and, for the XAM/kernel patches 0026-0027 and the memory patch 0028, a patched `librexruntime.so`), and the reach build runs codegen with it. Most of
 them are Xenia fixes the SDK never got; a few are porting slips. Every patch says "as in Xenia" in its comments and was checked against
 Xenia Canary `82d0cd1f4`, the build we use as the reference.
 
@@ -33,6 +33,11 @@ Xenia Canary `82d0cd1f4`, the build we use as the reference.
 | 0025 | Codegen: `vmsum3fp128`/`vmsum4fp128` | The dot products ran SSE `dpps`, which gives +/-infinity (or NaN) when the sum of finite inputs overflows float32. Xenon gives QNaN `0x7FC00000`, as Xenia emulates (`DOT_PRODUCT_3/4`). Reported upstream as rexglue/rexglue-sdk#491 | none seen in Reach; in Forza Horizon the collision GJK's first termination test relied on it, and free roam crashed about half the time |
 | 0026 | Kernel/XAM: `ObDereferenceObject`, `XamApp` 0x2000E, `XamTaskSchedule` | `ObDereferenceObject` on an `XEnumerator` found its object through a handle the enumerator's own fields overwrite and released an unrelated object; the content-aggregate enumeration did not write the item count on NO_MORE_FILES; `XamTaskSchedule` never released the task thread's handle. Branch `fix/xam-enumerators` in the upstream clone | Firefight froze while loading a mission. Reach's own overrides (`object_refs.cpp`, `live_xmsg.cpp`) still work around it for stock SDKs; with `REACH_SDK_OBJECT_REFS=1 REACH_SDK_XMSG=1` and this patch, Firefight loads fine (the task message block leak is not covered) |
 | 0027 | Kernel/XAM: `XMPGetPlaybackController` | 10 ms sleep before answering on non-main threads (Xenia's throttle) | held the game to 45 fps; with `REACH_SDK_XMSG=1` and this patch the title screen runs 59.9 fps at `frame_rate = 60`. Branch `fix/xmp-playback-sleep` |
+| 0028 | Runtime (Linux): `QueryProtect`, `Protect` | The protection of an address was looked up by reading and parsing all of `/proc/self/maps` (about 1800 lines in a Forza Horizon race). The write-watch fault handler does that on every fault while holding the global critical region, which the GPU command processor needs for its shared-memory uploads: it waited on that lock about 17% of the time. Now one `PROCMAP_QUERY` ioctl (Linux 6.11+; older kernels still parse the file) | Forza race at 60 fps: the main gain in `docs/perf.md` > GPU emulation speed |
+| 0029 | Command processor | Type-0 packets wrote their registers one at a time through a virtual call, and every write ran `RegisterFile::GetRegisterInfo` (a switch over all registers) only to log unknown ones: 30% of the command processor thread in a Forza race (40 M writes a second). Type-0 runs now go through `WriteRegistersFromMem`, which copies the constant blocks in one go; known registers are a bitmap | command processor CPU per draw -30% |
+| 0030 | `WAIT_REG_MEM` | A failed poll slept 1 ms; the flip waits (a value the guest's vblank interrupt handler changes) now wake right after the vblank interrupt | up to 1 ms less per frame |
+| 0031 | Shared memory | `RequestRanges` allocated a vector and took the global critical region for every vertex and index buffer request, also when every page was already valid (85% of them); now that case is checked without the lock | fewer lock waits |
+| 0032 | Vulkan fetch constants | Rewriting a fetch constant with the value it already has (73% of the fetch dwords a Forza race writes) invalidated the texture bindings, the vertex buffer residency and the fetch constant buffer | 45% fewer texture binding updates |
 
 `experimental/0014` (tessellated triangle strips/fans as lists) is not applied; see its
 README.
