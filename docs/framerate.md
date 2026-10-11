@@ -189,3 +189,22 @@ alone does not raise the frame rate.
 clean measurements. Then measure what still looks like 30 Hz (objects, the first-person
 weapon) and decide whether (b) is worth it, starting with the objects closest to the camera.
 For 144 fps, see the limits under "The frame_rate setting".
+
+## Checks at frame_rate = 60 beyond SWAT (2026-10-10, contended, windowed)
+
+**Campaign, Winter Contingency (offline, Easy): a real problem.** The opening plays at a steady
+60.0 fps (p50 16.8 ms, p99 ~25 ms, one 180-450 ms hitch at the level load), with the same
+cinematic content as at 30 fps. But at about 3:15-3:50 into the cinematic, at the shot after
+the Falcon seat ("23"), the game reverts to the checkpoint (`REACH_GSTRACE=1`:
+`checkpoint_revert enter r3=0xc lr=0x8243fff4`, then `cache_slot_load`) and the whole opening
+starts again from the planet. Seen in 2 of 2 runs at 60 (screenshot montages `camp60_m.png`,
+`camp60b_m.png` in the run's scratch); the control run at the default 30 fps went on
+through the Falcon flight to gameplay ("use to look around" prompt) in the same time. The
+revert request comes from the caller at 0x8243FFF4 (not traced; a script or the mission's
+failure path acting on a tick-timed condition is the first suspect). Also seen at 60: one
+`XmaContext 127: There are no bits to copy!` during the cinematic (not compared with 30).
+Not fixed. Next: trace who calls the revert (r3 = 0xc is probably the reason) with gdb on
+0x8243FFF4's caller, and compare with the same point at 30 fps.
+
+Not yet checked at 60: Firefight on Overlook, a matchmade game (60/60 and 60/30) and System
+Link; the second half of the campaign check (gameplay after the Falcon) is blocked by the revert.
