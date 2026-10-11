@@ -21,7 +21,8 @@ std::string ReachGpuBackend() { return REXCVAR_GET(gpu_backend); }
 // the frame rate follows the guest's vblank rate (docs/framerate.md).
 REXCVAR_DEFINE_INT32(frame_rate, 30, "Display",
                      "Frame rate: 30 (the console's) or 60. 60 runs the guest vblank at 120 Hz; "
-                     "the game still simulates 30 ticks a second (docs/framerate.md)")
+                     "the game ticks at half the refresh rate, so it also simulates 60 ticks "
+                     "a second (docs/framerate.md)")
     .validator([](std::string_view v) { return v == "30" || v == "60"; })
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -55,8 +56,9 @@ void ApplyReachCvarDefaults() {
   SetSdkCvarDefault("vulkan_allow_present_mode_mailbox", "false");
   SetSdkCvarDefault("vulkan_allow_present_mode_fifo_relaxed", "false");
   // frame_rate = 60: twice the console's vblank rate. The game's frame limiter (2 vblanks),
-  // its render thread's schedule (a frame is shown 4 vblanks after its update starts) and
-  // its frame time (vblanks / refresh rate) all scale with it; the intro video keeps its
-  // speed. A video_mode_refresh_rate set in reach.toml or on the command line wins.
+  // its render thread's schedule (a frame is shown 4 vblanks after its update starts), its
+  // frame time (vblanks / refresh rate) and its tick rate (refresh rate / 2) all scale with
+  // it; the intro video keeps its speed. A video_mode_refresh_rate set in reach.toml or on
+  // the command line wins. src/hooks/frame_rate.cpp keeps cinematics working at 60 ticks.
   if (REXCVAR_GET(frame_rate) == 60) SetSdkCvarDefault("video_mode_refresh_rate", "120");
 }

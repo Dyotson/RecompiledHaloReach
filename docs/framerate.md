@@ -1,8 +1,10 @@
 # Frame rate above 30 fps: investigation
 
 Status: the 45 fps floor is fixed (a 10 ms sleep in the SDK's music player app, below), and
-`frame_rate = 60` in `reach.toml` (or `--frame_rate=60`) runs the game at 60 fps. Addresses are
-in `default.xex` (base version); `docs/perf.md` explains the measurements.
+`frame_rate = 60` in `reach.toml` (or `--frame_rate=60`) runs the game at 60 fps. The game
+ticks at half the display's refresh rate, so at 60 fps it also simulates 60 ticks a second
+(below); the campaign's cinematics needed a fix for that. Addresses are in `default.xex`
+(base version); `docs/perf.md` explains the measurements.
 
 ## How Reach paces itself
 
@@ -24,12 +26,21 @@ ticks    = floor(tick_rate * dt * game_speed + leftover)    // tick_rate: short 
 leftover = the fraction left over, kept at game_time+0x14   // seconds per tick: float at +8 (1/30)
 ```
 
-with a cap on ticks per frame. In a networked game the tick count comes from the
-simulation's network clock instead (`sub_8220F130`), adjusted by `sub_8247BA48`. The ticks
-then run the simulation (`sub_821F4DF0`, profiled as `main_thread_raw_game_ticks_ms`), and
-player control gets `ticks * seconds_per_tick`
-(`sub_82442790` → `sub_8247C978`, the function the mouse-look hooks live in). So the
-simulation runs at a fixed 30 Hz of real time whatever the frame rate. After the ticks, some
+with a cap on ticks per frame (3 while a cinematic plays). In a networked game the tick count
+comes from the simulation's network clock instead (`sub_8220F130`), adjusted by
+`sub_8247BA48`. The ticks then run the simulation (`sub_821F4DF0`, profiled as
+`main_thread_raw_game_ticks_ms`), and player control gets `ticks * seconds_per_tick`
+(`sub_82442790` → `sub_8247C978`, the function the mouse-look hooks live in). So game time
+follows real time whatever the frame rate.
+
+**The tick rate is half the refresh rate.** The game options get `round(refresh rate) / 2`
+as their tick rate (`sub_82476A60`, options + 0xC, 60 if the rate is unknown), and the game
+time globals take it from there (`sub_8247B530`; TLS + 0x6C: +4 tick rate, +8 seconds per
+tick, +0xC game time in ticks). That is 30 at the console's 60 Hz, 25 on a 50 Hz PAL set,
+and 60 with `frame_rate = 60` (a 120 Hz vblank): checkpoint saves logged `rate=60`, and
+during cinematics every 16.7 ms frame ran one tick. Durations are converted with it
+(`game_seconds_to_ticks`, `sub_8214FAE8`): a script's `sleep 1` is 1/30 s, so 2 ticks at 60.
+Everything measured below at a 120 Hz vblank ran at 60 ticks a second. After the ticks, some
 systems update once per frame with the real or game delta time: `sub_82208CC8` (per-player
 frame callbacks, effects) and six `*(dt)` calls at the end of `sub_82440410`.
 
@@ -54,14 +65,15 @@ next to other games (contended): fine for behaviour, not for frame rates.
   with `tools/guestmem.py`), and the game rendered 43-46 fps instead of 30 on the menus and
   in a SWAT game. (The intro video ran at 111 fps: it presents once per vblank.)
 - **The simulation stays at real-time speed.** The SWAT clock went from 11:58 to 11:15 in
-  42 s of real time at 43 fps.
+  42 s of real time at 43 fps (at 60 ticks a second, see "The tick rate is half the refresh
+  rate").
 - **The camera moves on every frame.** Turning in place (right stick held) at ~45 fps, 13
   consecutive frames dumped from guest memory were each rotated 68-120 px further than the
   one before; with the view updated only on 30 Hz ticks, about one frame in three would
   repeat the previous view. A hash of every presented frame found no frame identical to the
   one before it in 2000+ frames of play. Effects and other per-frame systems move too.
-  Whether other objects (players, vehicles, projectiles) move between ticks was not
-  measured; the per-tick simulation suggests they do not.
+  With 60 ticks a second most frames run a tick, so this does not show what a frame
+  without a tick looks like.
 
 **Clean measurements** (reserved idle machine, 2026-10-10, commit `cb092d4`, windowed): with
 the 2-vblank limiter at a 120 Hz vblank the main menu ran 45.6 fps and a SWAT game 45.1 fps,
@@ -140,11 +152,11 @@ time stays right because it divides by the video mode's refresh rate.
 
 `frame_rate = 60` (`src/main.cpp`; 30 is the default, the setting needs a restart) makes
 the guest vblank 120 Hz (`video_mode_refresh_rate`, which `VdQueryVideoMode` reports and the
-SDK's VSync thread follows), unless `video_mode_refresh_rate` is set explicitly. Checked:
-title screen and menus 60 fps, a SWAT game at 60 fps with the clock at real-time speed, and
-the intro video, which presents every vblank (120 fps) but still ends at 46 s like at 60 Hz.
-Not yet checked: the campaign, Firefight and network games (the clock sync's extra vblank for
-a client running ahead becomes 8.3 ms instead of 16.7 ms), and what still moves at 30 Hz.
+SDK's VSync thread follows), unless `video_mode_refresh_rate` is set explicitly. The game
+then ticks 60 times a second. Checked: title screen and menus 60 fps, a SWAT game at 60 fps
+with the clock at real-time speed, the intro video, which presents every vblank (120 fps)
+but still ends at 46 s like at 60 Hz, and the campaign opening (below). In network games the
+clock sync's extra vblank for a client running ahead becomes 8.3 ms instead of 16.7 ms.
 
 Beyond 60: the SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`), so
 this scheme tops out at 120 fps, and its VSync thread checks for due vblanks every 1 ms, so
@@ -158,13 +170,16 @@ thread, the longest waits and the thread that signalled each one show the critic
 
 ## Options
 
-**(a) A higher tick rate (60 Hz).** The rate is data (`game_time+4`, with 1/30 at +8), but
-the game is built around 30 ticks a second: animations advance per tick, scripts and AI
+**(a) A higher tick rate (60 Hz).** This is what `frame_rate = 60` does, through the game's
+own rule (tick rate = refresh rate / 2, above), which this section did not know when it was
+written. The rate is data (`game_time+4`, with 1/30 at +8), but the game is built around 30
+ticks a second: animations advance per tick, scripts and AI
 count ticks, physics steps per tick, and the network protocol exchanges ticks, so every peer
 (Reach Live, System Link) would have to run the same rate. The constant 1/30 also appears
 about 90 times in the read-only data. MCC moved four other Halo games to 60 Hz ticks and
 had to fix hitscan range and projectile speed afterwards; it did not do it for Reach. Not
-recommended.
+recommended as a design, but it is what runs today; the campaign check below found one
+script that depended on it.
 
 **(b) 30 Hz ticks, interpolated rendering.** What MCC does: keep the previous and current
 tick's state of every rendered object (node matrices, camera) and draw at
@@ -180,7 +195,8 @@ it).
 network clock sync's extra vblank, or a higher guest vblank rate). Since the camera and
 effects already update per frame, turning and looking around get 60 fps or more; objects
 that only move on ticks still step at 30 Hz. No gameplay
-or network change, as ticks are untouched. Cost: about twice the CPU and GPU work per second,
+or network change, as ticks are untouched (through a higher vblank rate they are not
+untouched: the tick rate follows it, see (a)). Cost: about twice the CPU and GPU work per second,
 so the port has to hold 60 fps first (it does now: the title screen runs ~235 fps with the
 limiter off). Done as `frame_rate = 60` through the vblank rate (above): a hook on the limiter
 alone does not raise the frame rate.
@@ -192,19 +208,45 @@ For 144 fps, see the limits under "The frame_rate setting".
 
 ## Checks at frame_rate = 60 beyond SWAT (2026-10-10, contended, windowed)
 
-**Campaign, Winter Contingency (offline, Easy): a real problem.** The opening plays at a steady
-60.0 fps (p50 16.8 ms, p99 ~25 ms, one 180-450 ms hitch at the level load), with the same
-cinematic content as at 30 fps. But at about 3:15-3:50 into the cinematic, at the shot after
-the Falcon seat ("23"), the game reverts to the checkpoint (`REACH_GSTRACE=1`:
-`checkpoint_revert enter r3=0xc lr=0x8243fff4`, then `cache_slot_load`) and the whole opening
-starts again from the planet. Seen in 2 of 2 runs at 60 (screenshot montages `camp60_m.png`,
-`camp60b_m.png` in the run's scratch); the control run at the default 30 fps went on
-through the Falcon flight to gameplay ("use to look around" prompt) in the same time. The
-revert request comes from the caller at 0x8243FFF4 (not traced; a script or the mission's
-failure path acting on a tick-timed condition is the first suspect). Also seen at 60: one
-`XmaContext 127: There are no bits to copy!` during the cinematic (not compared with 30).
-Not fixed. Next: trace who calls the revert (r3 = 0xc is probably the reason) with gdb on
-0x8243FFF4's caller, and compare with the same point at 30 fps.
+**Campaign, Winter Contingency (offline, Easy): the opening looped; fixed.** The opening plays
+at a steady 60.0 fps (p50 16.8 ms, p99 ~25 ms, one 180-450 ms hitch at the level load). Before
+the fix, at the end of the opening cinematic (about 3:37 after the level loads, the shot after
+the Falcon seat) the game reverted to a checkpoint and played the whole opening again from
+the planet (in all 5 runs at 60, none of 3 at 30).
 
-Not yet checked at 60: Firefight on Overlook, a matchmade game (60/60 and 60/30) and System
-Link; the second half of the campaign check (gameplay after the Falcon) is blocked by the revert.
+The revert is the normal end of a cinematic. `checkpoint_revert` (`sub_824285C0`) is called
+by the main game's per-frame update (`sub_8243FF28`, return address 0x8243FFF4) for a revert
+request at 0x8367C0AA with its reason at 0x8367C0AB; reason 12 is set only by the script
+function `game_revert` (hs function 0x445, `sub_825CD110`; the hs function table is at
+0x82A31040). The script that called it (`REACH_GSTRACE=1` now logs the script's frames) does
+
+```
+(begin (cinematic_skip_stop_internal) (if (not (game_reverted)) (begin (game_revert) (sleep 1))))
+```
+
+the same at 30 fps (logged at game time 6519 at 30, 13038 at 60). `game_reverted` (hs function
+0x47D, `sub_825CD9C0`) is `game time == 0x83597B00`, the game time the last revert restored.
+So a cinematic is played between a checkpoint saved by `cinematic_skip_start` and a revert to
+it; the restored script, asleep in `sleep_until (not (game_saving)) 1` after the save, wakes
+in the reverted tick, sees `game_reverted` and skips what it has just shown, as a skip does.
+
+The checkpoint is taken (`sub_82428468`, at the start of the next frame) one tick after the
+script asks for it. At 30 ticks a second the script's `sleep_until ... 1` (1/30 s) is that same
+tick: save at game time 3, the restored script ran at 3, `game_reverted` true. At 60 the sleep
+is 2 ticks: save at 5, the script slept until 6, so after the revert to 5 it asked at 6 and got
+false, played the cinematic again and reverted at its end, forever. Logged with
+`REACH_GSTRACE=1` before the fix: `checkpoint_save time=5 rate=60`, after the revert `frame ticks=1 time=5`,
+`ticks=0 time=6`, `ticks=1 time=6` and `game_reverted? time=6 revert_time=5`.
+
+Fix (`src/hooks/frame_rate.cpp`): `game_reverted` also counts the rest of the 30 Hz tick
+the revert happened in (game time - revert time < round(tick rate / 30)), so it is unchanged
+at 30 ticks a second. Nothing else reads 0x83597B00 but the checkpoint serialization. With
+it the opening reaches gameplay at 60 ("use to look around", "Current objective: locate
+distress beacon", "Checkpoint... done", the Falcon lands); the second cinematic, the Falcon
+flight, ends the same way (both log `frame_rate: game_reverted 1 tick(s) after the revert`).
+The 30 fps control run is unchanged (no such line; same reverts at the same points). The
+`XmaContext 127: There are no bits to copy!` error shows up once in the opening at both 30
+and 60.
+
+Not yet checked at 60: Firefight on Overlook, a matchmade game (60/60 and 60/30), System
+Link, and campaign gameplay after the Falcon beyond the landing.
