@@ -256,7 +256,9 @@ back to back). Per-thread CPU from `/proc/<pid>/task/*/stat`.
 Load: the Reach level-load stall (the 460 ms frame) came 76-92 s after launch before and
 78-83 s after (a few runs on both sides were later than the 107 s the run watched, the
 machine was busy): no difference outside the noise. No hangs, no audio errors, no new log
-errors. The faceless Carter and Kat in the campaign briefing show in all these runs, with
-and without 0029-0032 and 0033, so those patches don't cause it (triage 2026-10-11).
+errors. The faceless Carter and Kat in the campaign briefing show in all these runs (that
+triage switched plugins with `REXSDK`, which does not change the GPU plugin: it is loaded from
+the executable's folder, see `docs/rendering.md`). The faces were a dropped tessellated draw,
+fixed by SDK patch 0035.
 
 Upstream: rexglue/rexglue-sdk issue #500 and PR #501 (branch `perf/wait-multiple-epoch`).

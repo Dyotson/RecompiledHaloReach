@@ -1,4 +1,3 @@
-diff --git a/include/rex/graphics/primitive_processor.h b/include/rex/graphics/primitive_processor.h
 --- a/include/rex/graphics/primitive_processor.h
 +++ b/include/rex/graphics/primitive_processor.h
 @@ -511,6 +511,27 @@
@@ -29,25 +28,34 @@ diff --git a/include/rex/graphics/primitive_processor.h b/include/rex/graphics/p
    static constexpr uint32_t GetLineLoopStripIndexCount(uint32_t loop_index_count) {
      // Even if 2 vertices are supplied, two lines are still drawn between them.
      // https://www.khronos.org/opengl/wiki/Primitive
-@@ -599,6 +620,14 @@
-              ++range_it) {
-           TriangleFanToList(dest_write_ptr, source + range_it->guest_offset,
-                             range_it->guest_index_count, index_transform);
-+          dest_write_ptr += range_it->host_index_count;
-+        }
-+        break;
+@@ -602,6 +623,14 @@
+           dest_write_ptr += range_it->host_index_count;
+         }
+         break;
 +      case xenos::PrimitiveType::kTriangleStrip:
 +        for (PrimitiveRangeIterator range_it = ranges_beginning; range_it != ranges_end;
 +             ++range_it) {
 +          TriangleStripToList(dest_write_ptr, source + range_it->guest_offset,
 +                              range_it->guest_index_count, index_transform);
-           dest_write_ptr += range_it->host_index_count;
-         }
-         break;
-diff --git a/src/graphics/primitive_processor.cpp b/src/graphics/primitive_processor.cpp
++          dest_write_ptr += range_it->host_index_count;
++        }
++        break;
+       case xenos::PrimitiveType::kLineLoop:
+         for (PrimitiveRangeIterator range_it = ranges_beginning; range_it != ranges_end;
+              ++range_it) {
 --- a/src/graphics/primitive_processor.cpp
 +++ b/src/graphics/primitive_processor.cpp
-@@ -295,17 +295,20 @@
+@@ -39,6 +39,9 @@
+ REXCVAR_DEFINE_BOOL(skip_adaptive_triangle_tessellation, true, "GPU",
+                     "Drop draws of adaptively tessellated triangle patches (water in "
+                     "Halo: Reach); the first such draw hangs the GPU on RADV");
++REXCVAR_DEFINE_BOOL(tessellated_strips_and_fans_as_lists, true, "GPU",
++                    "Draw tessellated triangle strips and fans as triangle lists (the faces "
++                    "of the main characters in Halo: Reach cinematics); off drops them");
+ REXCVAR_DEFINE_INT32(primitive_processor_cache_min_indices, 0, "GPU",
+                      "Minimum indices for primitive processor cache")
+     .range(0, 1000000);
+@@ -298,17 +301,37 @@
    xenos::TessellationMode tessellation_mode = regs.Get<reg::VGT_HOS_CNTL>().tess_mode;
    Shader::HostVertexShaderType host_vertex_shader_type;
    if (tessellation_enabled) {
@@ -65,16 +73,33 @@ diff --git a/src/graphics/primitive_processor.cpp b/src/graphics/primitive_proce
          // https://www.khronos.org/registry/OpenGL/extensions/AMD/AMD_vertex_shader_tessellator.txt
 -        // Would need to convert those to triangle lists, but haven't seen any
 -        // games using tessellated strips / fans so far.
-+        // Convert strips and fans to triangle lists for tessellation (as in
-+        // Xenia). 4D53085B (Halo: Reach) draws indexed discrete-tessellated
-+        // triangle strips in its campaign.
++        // Convert strips and fans to triangle lists for tessellation (Xenia
++        // 3eab2b8b39 does it for auto-indexed draws; indexed ones are
++        // converted here too). 4D53085B (Halo: Reach) draws the faces of its
++        // main characters in cinematics as indexed discrete-tessellated
++        // triangle strips; dropping them left the faces out.
 +        if (guest_primitive_type != xenos::PrimitiveType::kTriangleList) {
++          bool convert = REXCVAR_GET(tessellated_strips_and_fans_as_lists);
++          static bool logged = false;
++          if (!logged) {
++            logged = true;
++            REXGPU_INFO(
++                "Primitive processor: tessellated triangle {} {} (tessellation mode {}, "
++                "levels {} to {})",
++                guest_primitive_type == xenos::PrimitiveType::kTriangleStrip ? "strip" : "fan",
++                convert ? "drawn as a list" : "dropped", uint32_t(tessellation_mode),
++                regs.Get<float>(XE_GPU_REG_VGT_HOS_MIN_TESS_LEVEL),
++                regs.Get<float>(XE_GPU_REG_VGT_HOS_MAX_TESS_LEVEL));
++          }
++          if (!convert) {
++            break;
++          }
 +          host_primitive_type = xenos::PrimitiveType::kTriangleList;
 +        }
          switch (tessellation_mode) {
            case xenos::TessellationMode::kDiscrete:
              // - 415607E1 - nets above barrels in the beginning of the first
-@@ -510,9 +513,52 @@
+@@ -527,9 +550,52 @@
            assert_true(host_primitive_type == xenos::PrimitiveType::kTriangleList);
            cacheable.host_draw_vertex_count =
                GetTriangleFanListIndexCount(cacheable.host_draw_vertex_count);
@@ -130,18 +155,18 @@ diff --git a/src/graphics/primitive_processor.cpp b/src/graphics/primitive_proce
            break;
          case xenos::PrimitiveType::kLineLoop:
            // Plus 1 element (if there's anything to draw) in the strip, still
-@@ -651,6 +697,10 @@
-         switch (guest_primitive_type) {
+@@ -669,6 +735,10 @@
            case xenos::PrimitiveType::kTriangleFan:
              host_index_count_getter = GetTriangleFanListIndexCount;
-+            break;
+             break;
 +          case xenos::PrimitiveType::kTriangleStrip:
 +            // Only converted for tessellation.
 +            host_index_count_getter = GetTriangleStripListIndexCount;
-             break;
++            break;
            case xenos::PrimitiveType::kLineLoop:
              host_index_count_getter = GetLineLoopStripIndexCount;
-@@ -1230,6 +1280,7 @@
+             break;
+@@ -1247,6 +1317,7 @@
        const PassthroughIndexTransform& index_transform);                   \
    XE_GPU_PRIMITIVE_PROCESSOR_INSTANTIATE_CONVERSION_NO_PASSTHROUGH(ConverterName)
  XE_GPU_PRIMITIVE_PROCESSOR_INSTANTIATE_CONVERSION(TriangleFanToList)

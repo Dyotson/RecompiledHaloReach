@@ -39,9 +39,11 @@ Xenia Canary `82d0cd1f4`, the build we use as the reference.
 | 0031 | Shared memory | `RequestRanges` allocated a vector and took the global critical region for every vertex and index buffer request, also when every page was already valid (85% of them); now that case is checked without the lock | fewer lock waits |
 | 0032 | Vulkan fetch constants | Rewriting a fetch constant with the value it already has (73% of the fetch dwords a Forza race writes) invalidated the texture bindings, the vertex buffer residency and the fetch constant buffer | 45% fewer texture binding updates |
 | 0033 | Threading (POSIX) | `WaitMultiple` (WaitAny/WaitAll on several handles) polled: it tried to lock every handle and slept 1 ms, over and over, so the Audio Worker (nine handles, mostly idle) used ~75% of a core; it now sleeps on one global condition variable that every signal wakes (20 ms cap as a safety net) | Audio Worker 79% -> 1% of a core (Reach menu), 80% -> 13% (Forza menu) |
+| 0034 | Vulkan tessellation shaders | The GLSL the SDK generates for the tessellation vertex and hull shaders declared the system constants at set 0, binding 0. That binding is the shared memory storage buffer; the constants are at set 1, binding 0. Tessellation factors and index bounds came from guest memory at those offsets | most likely the GPU hang of the water and of `experimental/0014` (the water is not retested; see `docs/rendering.md`) |
+| 0035 | Primitive processor | Tessellated triangle strips and fans were rejected ("Unsupported tessellation mode 0 for primitive type 6"). They are now drawn as triangle lists, auto-indexed and indexed (Xenia 3eab2b8b39 does auto-indexed only). `--tessellated_strips_and_fans_as_lists=false` drops them as before | black skin on Carter's and Kat's faces in cinematics (their faces are indexed discrete-tessellated strips). **Fixed** |
 
-`experimental/0014` (tessellated triangle strips/fans as lists) is not applied; see its
-README.
+The former `experimental/0014` (tessellated triangle strips/fans as lists) is now 0035. It hung the
+GPU, most likely because of the binding fixed by 0034: with 0034 the same draws run fine.
 
 Audit method (worth repeating for the rest of the GPU code): normalize SDK and Xenia
 sources (strip comments/whitespace, `xe::`/`rex::`), diff statement by statement, and look
@@ -116,13 +118,14 @@ Open GPU issues in the campaign (Winter Contingency):
 
 - Faint cyan speckles on the near ground in the Falcon landing shot were seen before 0019;
   recheck (0019 removed the teal cast in gameplay).
-- About 4 indexed, discrete-tessellated triangle strip draws per frame are dropped
-  ("Unsupported tessellation mode 0 for primitive type 6"); Xenia 82d0cd1 drops indexed ones
-  too (it converts auto-indexed strips/fans only, see `experimental/0014`).
+- ~~About 4 indexed, discrete-tessellated triangle strip draws per frame are dropped~~: the
+  faces of Carter and Kat in cinematics; drawn since 0034 + 0035 (`docs/rendering.md`).
 - GPU hang (amdgpu `ring gfx timeout`, `VK_ERROR_DEVICE_LOST`) about 4 minutes into the
   campaign as the Falcons take off, and on Sword Base in Forge: the first adaptive-tessellation
   draw (`kTrianglePatch`, float32 edge factors, `VGT_HOS_MAX_TESS_LEVEL` 15; the water) hangs
-  RADV. 0016 fixed the factor decoding and 0017 the domain-shader setup, but the hang stays;
+  RADV. 0016 fixed the factor decoding and 0017 the domain-shader setup, but the hang stays
+  (likely cause found later: the tessellation shaders read their factor range from the wrong
+  descriptor set, fixed by 0034; the water itself is not retested);
   0018 skips these draws. **Why the game issues them at all (fixed by 0022):** in Xenia the
   game issues the water pair (a 996-point memexport that computes the edge factors, VS
   `E43930922B695042`, then the patch draw, VS `9ABC75772F0D46B1`) only in the first frames of

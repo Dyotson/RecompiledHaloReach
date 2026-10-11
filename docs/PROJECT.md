@@ -399,6 +399,14 @@ Check exact param names in `endpoints.json` before calling.
   props dropping at the start of the map, then in the AI, until "An error occurred while
   playing co-op"; a 30/30 control stays identical. Something besides the game's tick rate
   reads the 120 Hz display rate, most likely the physics. Details: `docs/framerate.md`.
+- 2026-10-11: **Carter's and Kat's faces render (SDK patches 0034, 0035).** Their faces in
+  cinematics are indexed triangle strips with discrete tessellation, which the SDK (and
+  Xenia) dropped ("Unsupported tessellation mode 0 for primitive type 6"). 0035 draws
+  tessellated strips and fans as lists. 0034 fixes the GLSL tessellation shaders, which read
+  their factors and index bounds from the shared memory buffer instead of the system
+  constants. That was most likely why the earlier attempt (`experimental/0014`) and the
+  water hung the GPU. GPU plugins load from the executable's folder, so `REXSDK` A/B runs
+  never swapped the plugin. Details: `docs/rendering.md`.
 
 ## Debugging recipes
 
@@ -447,7 +455,11 @@ Check exact param names in `endpoints.json` before calling.
   kernel wait and signal with thread, handle, duration and guest call stack
   (`src/debug/sync_trace.cpp`, analysis in `docs/framerate.md`).
 - Frame dumps without screenshots: `REACH_FRAMEDUMP=20,28` + `--vulkan_readback_resolve=true`, then
-  `tools/frame_to_png.py`. Texture binding trace: `REACH_TEXTRACE=1`. Live guest memory: `tools/guestmem.py`.
+  `tools/frame_to_png.py`. `REACH_FRAMEDUMP_BURST_TRIGGER=<file>` dumps `REACH_FRAMEDUMP_BURST`
+  (default 60) consecutive frames each time the file appears, to check motion frame by frame.
+- Comparing GPU plugins: the SDK loads `librexgpu-xenos.so` from the executable's folder only;
+  `REXSDK` switches `librexruntime.so`, not the plugin. Copy `reach`, the `reach_*` module
+  libraries and the plugin into a folder and start it there (`docs/rendering.md`). Texture binding trace: `REACH_TEXTRACE=1`. Live guest memory: `tools/guestmem.py`.
   `--gpu_allow_invalid_fetch_constants=true` silences thousands of fetch-constant warnings.
 - Find the guest function behind an "Unhandled guest access violation": run under gdb with
   `catch signal SIGSEGV` conditioned on `$_siginfo._sifields._sigfault.si_addr` (guest address
