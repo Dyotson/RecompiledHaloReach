@@ -74,6 +74,7 @@ set(REACH_SOURCES
     src/debug/sync_trace.cpp
     src/debug/texture_trace.cpp
     src/hooks/frame_rate.cpp
+    src/hooks/frame_rate_net.cpp
     src/hooks/mouse_look.cpp
     src/hooks/offline_challenges.cpp
     src/hooks/switch_tailcalls.cpp

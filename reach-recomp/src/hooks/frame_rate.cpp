@@ -25,7 +25,8 @@
 //
 // Each machine takes the tick rate from its own display, also in network games, so network
 // co-op (campaign and Firefight are synchronous games: every machine runs the same
-// simulation) needs the same frame_rate on every machine (docs/framerate.md).
+// simulation) needs the same frame_rate on every machine; frame_rate_net.cpp keeps machines
+// with different ones apart (docs/framerate.md).
 
 #include "../platform/guest_memory.h"
 

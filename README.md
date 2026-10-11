@@ -144,9 +144,11 @@ tools/play.sh --resolution_scale=2   # render at 2304x1440 instead of 1152x720
 - **Frame rate:** `frame_rate = 60` in `reach.toml` runs the game at 60 fps instead of the
   console's 30. The game ticks at half the display rate, so it then also simulates 60 ticks
   a second (game time stays real time). Checked in the campaign, Firefight, matchmaking and
-  System Link ([`docs/framerate.md`](docs/framerate.md)). Network co-op (campaign or Firefight
-  over System Link or Reach Live) needs the same `frame_rate` for every player: a 60 fps
-  player with a 30 fps one gets "An error occurred while playing co-op".
+  System Link ([`docs/framerate.md`](docs/framerate.md)). Online, every player needs the same
+  `frame_rate`: players with different settings can't join each other's games (System Link
+  lists the game but Join does nothing, matchmaking never matches them, and the log says
+  `frame_rate: a session at 60 ticks a second is not joinable`). Mixed co-op fails with "An
+  error occurred while playing co-op".
 - **Saves** (profile, Credits, Armory, maps, films) are in `~/.local/share/reach/`; the log
   is `~/.local/share/reach/reach.log`.
 - Skip the intro video with Esc (Start); in menus Enter is A and Backspace is B.

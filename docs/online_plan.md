@@ -755,7 +755,9 @@ XSESSION_CREATE_USES_MATCHMAKING to the server with its playlist (the hopper id 
 searched for), slots, our user properties and contexts (XUserSetProperty 0xB0007 /
 XUserSetContext 0xB0006 are recorded) and its QoS data (XNetQosListen). A search sends
 the playlist to the server and waits up to 0.5 s for the answer, then fills the results
-(0x5C-byte XSESSION_SEARCHRESULTs with the properties and contexts after them). The
+(0x5C-byte XSESSION_SEARCHRESULTs with the properties and contexts after them). The search
+key is the playlist with the tick rate in its top byte when it is not 30
+(`docs/framerate.md`, players with different frame rates are not matched). The
 server (`reach_live_server.py`, messages 15–17) returns the room's sessions for that
 playlist; a searcher that hosts a session itself only gets older ones, otherwise two
 groups that find each other join each other and both wait forever.

@@ -149,6 +149,8 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((pid, xuid, body[20:20 + size]), (a_id, 0x0009000000000041, b"record"))
         b.send(MATCH_SEARCH, struct.pack(">II", 102, 8))  # another playlist
         self.assertEqual(struct.unpack_from(">IH", b.recv()[1]), (8, 0))
+        b.send(MATCH_SEARCH, struct.pack(">II", 101 ^ (60 << 24), 10))  # the playlist at 60 ticks/s
+        self.assertEqual(struct.unpack_from(">IH", b.recv()[1]), (10, 0))
         a.send(MATCH_PUBLISH, b"\0")  # withdrawn
         time.sleep(0.2)
         b.send(MATCH_SEARCH, struct.pack(">II", 101, 9))

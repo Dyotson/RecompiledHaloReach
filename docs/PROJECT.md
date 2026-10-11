@@ -366,6 +366,12 @@ Check exact param names in `endpoints.json` before calling.
   Firefight, matchmaking (60/60, 60/30) and System Link co-op at 60/60 checked; network co-op
   with a 30 fps player errors out ("An error occurred while playing co-op"). `REACH_GSTRACE=1`
   now logs script reverts with the script's call stack. Details: `docs/framerate.md`.
+- 2026-10-11: **Players with different `frame_rate` settings are kept apart online.** Each
+  machine ticks at its own display rate, so mixed co-op breaks. `src/hooks/frame_rate_net.cpp`
+  folds the tick rate into the build number the game already compares when joining (System
+  Link list, roster, join-request), and matchmaking searches carry it in their key, so the
+  Reach Live server only matches equal rates. `REACH_MIXED_FRAME_RATE=1` turns it off for
+  tests. Details: `docs/framerate.md`.
 
 ## Debugging recipes
 

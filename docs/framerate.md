@@ -157,8 +157,8 @@ then ticks 60 times a second. Checked: title screen and menus 60 fps, a SWAT gam
 with the clock at real-time speed, the intro video, which presents every vblank (120 fps)
 but still ends at 46 s like at 60 Hz, the campaign, Firefight, matchmaking and System Link
 (below). In network games the clock sync's extra vblank for a client running ahead becomes
-8.3 ms instead of 16.7 ms. Network co-op (campaign, Firefight) needs every player on the same
-frame rate.
+8.3 ms instead of 16.7 ms. Players with different frame rates are kept out of each other's
+network games ("Network games with different frame rates", below).
 
 Beyond 60: the SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`), so
 this scheme tops out at 120 fps, and its VSync thread checks for due vblanks every 1 ms, so
@@ -281,5 +281,39 @@ start) is not enough: both machines then ran 30 ticks with their game times in s
 synchronous simulation, which only stays identical when every machine runs one tick per frame
 (30/30 at 30 ticks, 60/60 at 60). That override was dropped (it would also put 60/60 co-op at
 30 ticks, two frames per tick, untested). Network co-op needs the same `frame_rate` on every
-machine; the README says so. Not traced: which per-frame update it is (`sub_82208CC8`, the
-per-frame calls at the end of `sub_82440410` and player input sampling are the candidates).
+machine, which is now enforced (next section). Not traced: which per-frame update it is
+(`sub_82208CC8`, the per-frame calls at the end of `sub_82440410` and player input sampling are
+the candidates).
+
+## Network games with different frame rates
+
+Every machine takes its tick rate from its own display, also in network games, so a 60 fps
+player simulates 60 ticks a second next to a 30 fps one. Co-op fails that way (above), and
+mixed multiplayer games are not checked. So machines with different frame rates do not play
+together (`src/hooks/frame_rate_net.cpp`), through the game's own check that keeps different
+builds apart:
+
+- The build number (11860, at `0x82BD2660`) travels in the join-request (message 8: +4 the
+  lowest host version the joiner takes, +8 its own version, +0xC the executable type 5),
+  which the host refuses (`sub_82319380`) with join-refuse reason 25 `peer-version-too-low` or
+  26 `host-version-too-low`, and in the header of a session's status (`sub_82270170`: +4
+  executable type, +8 version, +0xC compatible version), which System Link's
+  broadcast-reply and a Live session's QoS data carry. The menus offer to join a session only
+  when its range takes our version (`sub_826EA6C8`, from the System Link list and the
+  roster), and the roster rates the session as not joinable otherwise (`sub_822CABB8`).
+- A machine that does not run 30 ticks a second sends 11860 + (tick rate << 8) in these
+  four places (16 bits on the wire: 0x6A54 at 60). The checks compare what arrives with what
+  this machine sends: the same number becomes 11860 again, a different one a version the game
+  refuses. 30 tick machines send the plain number, so they still play with older builds.
+  Saved content (films, maps, game types) keeps the plain number; nothing else reads the
+  tagged one.
+- Matchmaking: the search key a client sends the Reach Live server (`live_xmsg.cpp`) is the
+  playlist with the tick rate in its top byte when it is not 30, so the server only matches
+  players with the same frame rate (`server/reach_live_server.py` compares keys).
+- `REACH_MIXED_FRAME_RATE=1` (on every machine) turns all of this off, for tests.
+
+Checked (System Link, two instances, 2026-10-11): 60 host and 60 joiner: X ("Join User") on
+the host's party joins its Firefight lobby. 60 host and 30 joiner: the host's lobby is listed
+but X does nothing, and both log `frame_rate: a session at 60 ticks a second is not joinable
+(we run 30)` (the host for the joiner's main menu party: `at 30 ... (we run 60)`). Same
+frame rates behave as before.

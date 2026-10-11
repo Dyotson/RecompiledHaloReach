@@ -29,6 +29,7 @@
 // did before) and what we answered. Message layouts follow the Xenia netplay fork
 // (AdrianCassar/xenia-canary, BSD), see docs/online_plan.md.
 
+#include "../hooks/frame_rate.h"
 #include "../platform/guest_memory.h"
 #include "../platform/sdk_import.h"
 #include "identity.h"
@@ -502,7 +503,9 @@ uint32_t XInviteGetAcceptedInfo(uint8_t* base, uint32_t args) {
 // room's sessions with the searched playlist. The record: XSESSION_INFO, slots (max
 // public, max private, filled public, filled private: u8 each), our user properties
 // (u8 count, then id u32, type u8, value 8 bytes) and contexts (u8 count, then id u32,
-// value u32), the QoS data (u16 length + bytes).
+// value u32), the QoS data (u16 length + bytes). The server matches sessions by search key:
+// the playlist, with our tick rate in the top byte when it is not 30 (reach::MatchmakingKey),
+// so players with different frame rates are not matched (docs/framerate.md).
 
 constexpr uint32_t kSessionUsesMatchmaking = 0x8;
 constexpr uint32_t kPropertyHopper = 0x10000015;
@@ -572,7 +575,7 @@ void PublishMatchLocked() {
   }
   std::vector<uint8_t> body(5);
   body[0] = 1;
-  Store32(body.data() + 1, PlaylistLocked());
+  Store32(body.data() + 1, reach::MatchmakingKey(PlaylistLocked()));
   body.insert(body.end(), best->info, best->info + kSessionInfoSize);
   for (uint32_t n : {best->max_public, best->max_private, best->filled_public, best->filled_private}) {
     body.push_back(uint8_t(std::min<uint32_t>(n, 255)));
@@ -658,7 +661,7 @@ uint32_t XSessionSearchWeighted(uint8_t* base, uint32_t buffer) {
     std::unique_lock<std::mutex> lock(match_mutex);
     const uint32_t request = ++match_request;
     std::vector<uint8_t> body(8);
-    Store32(body.data(), playlist);
+    Store32(body.data(), reach::MatchmakingKey(playlist));
     Store32(body.data() + 4, request);
     reach::LiveSendMatch(true, body);
     if (match_answered.wait_for(lock, std::chrono::milliseconds(500),
