@@ -203,10 +203,11 @@ so the port has to hold 60 fps first (it does now: the title screen runs ~235 fp
 limiter off). Done as `frame_rate = 60` through the vblank rate (above): a hook on the limiter
 alone does not raise the frame rate.
 
-**Next:** find the per-frame update that breaks 60/30 network co-op (below), check how a
-60-tick player looks to a 30-tick one in a multiplayer game, and measure on a clean machine. Then measure what still looks like 30 Hz (objects, the first-person
-weapon) and decide whether (b) is worth it, starting with the objects closest to the camera.
-For 144 fps, see the limits under "The frame_rate setting".
+**Next:** find what makes a 120 Hz machine's physics differ from a 60 Hz one's at the same
+tick rate ("60/30 co-op: what diverges", below), and measure on a clean machine. Then measure
+what still looks like 30 Hz (objects, the first-person weapon) and decide whether (b) is worth
+it, starting with the objects closest to the camera. For 144 fps, see the limits under "The
+frame_rate setting".
 
 ## Checks at frame_rate = 60 beyond SWAT (2026-10-10, contended, windowed)
 
@@ -281,9 +282,8 @@ start) is not enough: both machines then ran 30 ticks with their game times in s
 synchronous simulation, which only stays identical when every machine runs one tick per frame
 (30/30 at 30 ticks, 60/60 at 60). That override was dropped (it would also put 60/60 co-op at
 30 ticks, two frames per tick, untested). Network co-op needs the same `frame_rate` on every
-machine, which is now enforced (next section). Not traced: which per-frame update it is
-(`sub_82208CC8`, the per-frame calls at the end of `sub_82440410` and player input sampling are
-the candidates).
+machine, which is now enforced (next section). What diverges: "60/30 co-op: what diverges",
+below (not per-frame updates alone).
 
 ## Network games with different frame rates
 
@@ -317,3 +317,81 @@ the host's party joins its Firefight lobby. 60 host and 30 joiner: the host's lo
 but X does nothing, and both log `frame_rate: a session at 60 ticks a second is not joinable
 (we run 30)` (the host for the joiner's main menu party: `at 30 ... (we run 60)`). Same
 frame rates behave as before.
+
+**Mixed multiplayer works in a short test.** System Link custom game, Slayer (free for all)
+on Sword Base, 60 fps host and 30 fps client with `REACH_MIXED_FRAME_RATE=1` (2026-10-11).
+Each machine ran its own tick rate (60 and 30). Players were put in view of each other by
+writing the client's biped position in its own process (writes on the host don't stick: the
+client owns its biped's movement).
+
+- Movement: a player's position, read from both processes every 50 ms while it walked forward
+  2 s and strafed 2 s, followed the same path on both machines: the 60 tick player as the 30
+  tick machine saw it within 3 cm, the 30 tick player on the 60 tick machine within 5 cm, no
+  visible lag at 50 ms sampling. Both walked at 2.1-2.2 m/s.
+- Shooting and damage, both ways: each saw the other's muzzle flash, tracers and shield flare;
+  the 30 fps player killed the 60 fps one with an assault rifle burst and the other way round.
+  Both machines showed each kill (medal, "You killed Spartan3", the victim's death camera with
+  "Respawn in"), the scoreboard at 1-1 and the respawns.
+- Rate of fire: holding the trigger for 2 s fired 21 rounds on both.
+- The game clocks agreed.
+
+Not checked: whole games, grenades and other projectiles at range, vehicles, more than two
+players. The gate above still applies to multiplayer.
+
+## 60/30 co-op: what diverges (2026-10-11, not fixed)
+
+Tools (`src/debug/sync_diff.cpp`, all off unless their variable is set):
+
+- `REACH_GSDUMP=DIR REACH_GSDUMP_TICKS=T1,T2,...`: in a synchronous game (with
+  `REACH_GSDUMP_LOCAL=1` also in local games after the main menu), right after the
+  tick that brings the game time to Ti (`sub_821224D8`, one game tick), the live game state
+  (0xA70000 bytes at `*0x83597B04`) goes to `DIR/gs_Ti.bin` and the thread globals block
+  (`*r13`, 0x800 bytes) to `DIR/tls_Ti.bin`; the log line prints the state's address. Both
+  machines dump the same ticks; `tools/gsdiff.py diff` compares them (the states sit at
+  different addresses, so pointer differences of exactly that offset are ignored) and groups
+  the differences by thread-globals slot (`gsdiff.py names PID` reads the allocation names from
+  the code, e.g. 0x6c "game time globals", 0x74 "player control globals", 0x338 "random
+  math") and data array; `gsdiff.py objects` lists differing object fields.
+- `REACH_FRAMEDIFF=DIR REACH_FRAMEDIFF_TICKS=...`: on a machine with more frames than ticks,
+  the state after the frame that ran tick Ti and after the next frame, which ran none
+  (`sub_82440410` hooked): what changed was written outside the ticks.
+- `REACH_SYNC_TICKS30=1`: synchronous games at 30 ticks a second (the game globals' copy of the
+  options' tick rate is patched when `sub_82476568` copies the options in at game start, and
+  before `sub_8247B530` sets up the game time); `=2` also local games.
+  `REACH_SYNC_FPS30=1`: synchronous games at most one frame per 4 vblanks at 120 Hz (30 fps,
+  one tick per frame). `reach_in_tick` (a symbol) is 1 while a tick runs, for conditional
+  watchpoints in gdb.
+
+Runs (System Link Firefight, Overlook, two idle players, 60 fps host with
+`REACH_SYNC_TICKS30=1`, 30 fps client, `REACH_MIXED_FRAME_RATE=1`):
+
+- Both run 30 ticks a second with their game times in step, and both still get "An error
+  occurred while playing co-op" after 40-65 s (4 runs), also with the host paced to 30 fps
+  (`REACH_SYNC_FPS30`, one tick per frame).
+- 30/30 control with the same tools: no game object field differs through tick 3000 (100 s),
+  apart from 7 bytes in one Grunt; the only differences are render caches, particles,
+  effects, HUD, impacts and similar non-deterministic state. No error.
+- 60/30: the states agree at ticks 1, 2, 3 and 5 (random seeds, game time, players, AI,
+  objects). Between ticks 5 and 10 the physics props that drop at the start of the map
+  (objects ~391-409, tags 8db324e6, 8de0250b, 8dec2514, 8e132533) start to differ: position,
+  velocity and Havok state (+0x23-0x2b, +0x47-0x7f, +0x1b6-0x233), small float differences
+  that end in different resting positions by tick 90, the same in every run. Later, once the
+  AI move (ticks ~900-1500), actors, squads, AI bipeds, Havok proxies and props differ more
+  and more until the error. Random seeds ("random math"), the game time and the players'
+  bipeds stay equal.
+- Frames without a tick on the 60 fps machine write: the player control globals (a clock that
+  advances per frame), the game time's leftover fraction, a game sound counter, render,
+  effect and HUD state, and one float in a few AI bipeds (Grunts +0x2778, Elites ~+0x3930,
+  +0.013 per frame). gdb watchpoints on Elite node data caught writes from the `job0` worker
+  thread (`sub_8242AAA0` → `sub_827D5C90` → `sub_82373010` → `sub_82374010` → `sub_82379DA8`
+  → animation code `sub_82128D20`, `sub_8216FE58`), all inside ticks.
+
+So per-frame updates are not the (only) cause: with one tick per frame on both machines the
+physics still diverges within 10 ticks of the start. What still differs between the two is the
+120 Hz display rate (the guest vblank) and whatever reads it besides the game time: a physics
+(Havok) step or substep setting taken from the refresh rate or from the unpatched game options
+at boot or map load is the likeliest. Next: compare a solo game loaded at 120 Hz with
+`REACH_SYNC_TICKS30=2` and one loaded at 60 Hz, dumped at tick 10 (`REACH_GSDUMP_LOCAL=1`
+dumps local games too): if the props differ, the cause is local to one machine and can
+be traced without a network, e.g. from the physics constants (thread globals +0x180) and the
+Havok world setup. Until then mixed co-op stays blocked (previous section).

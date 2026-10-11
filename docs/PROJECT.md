@@ -372,6 +372,14 @@ Check exact param names in `endpoints.json` before calling.
   Link list, roster, join-request), and matchmaking searches carry it in their key, so the
   Reach Live server only matches equal rates. `REACH_MIXED_FRAME_RATE=1` turns it off for
   tests. Details: `docs/framerate.md`.
+- 2026-10-11: **Mixed frame rates: multiplayer looks fine, co-op diverges in physics.** A
+  60 fps host and a 30 fps client in a System Link Slayer game (gate off) moved, shot, damaged
+  and killed each other normally, same fire rate and clocks. In co-op, forcing 30 ticks (and
+  even 30 fps) on the 60 fps machine is not enough: game state dumps of both machines
+  (`REACH_GSDUMP`, `tools/gsdiff.py`) agree at tick 5 and differ at tick 10 in the physics
+  props dropping at the start of the map, then in the AI, until "An error occurred while
+  playing co-op"; a 30/30 control stays identical. Something besides the game's tick rate
+  reads the 120 Hz display rate, most likely the physics. Details: `docs/framerate.md`.
 
 ## Debugging recipes
 

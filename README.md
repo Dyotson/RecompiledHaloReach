@@ -230,6 +230,8 @@ docker run -d -p 21100:21100/udp -p 21101:21101 -v reach-live-data:/data reach-l
 - `tools/system_link_pair.sh DIR_A DIR_B` starts two games on one machine in a System Link
   lobby (with `REACH_SERVER`, through a Reach Live server).
 - `server/test_reach_live_server.py`, `server/test_reach_live_lsp.py`: server tests.
+- `tools/gsdiff.py` compares game state dumps of two machines in a co-op game
+  (`REACH_GSDUMP`, [`docs/framerate.md`](docs/framerate.md)).
 - [`docs/PROJECT.md`](docs/PROJECT.md) has the status log and debugging recipes (RenderDoc,
   gdb, guest memory).
 
