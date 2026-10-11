@@ -320,8 +320,9 @@ frame rates behave as before. Matchmaking (Reach Live, Team Slayer, 60 and 30 fp
 searched for 90 s and never found each other, while the server held the 30 fps player's
 session under key 0x65 (playlist 101) and the 60 fps player's under 0x3C000065 (before the
 change a 60/30 pair was matched within 40 s). Not exercised: a join that reaches the host's
-check (an invite, or a roster join; from the matchmaking lobby the roster's Join Player was
-unavailable at any frame rate), so the join-refuse path and its log lines are untested.
+check (an invite, or a roster join: from the matchmaking lobby the roster's Join Player did
+nothing and the invite was not sent, not compared at equal rates), so the join-refuse path
+and its log lines are untested.
 
 **Mixed multiplayer works in a short test.** System Link custom game, Slayer (free for all)
 on Sword Base, 60 fps host and 30 fps client with `REACH_MIXED_FRAME_RATE=1` (2026-10-11).
