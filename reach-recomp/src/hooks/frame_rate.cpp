@@ -80,6 +80,7 @@ REX_EXTERN(__imp__sub_8249FEB0);  // scripted camera, mode 5: matrix of a shot c
 REX_EXTERN(__imp__sub_82476568);  // game start: copies the game options into the game globals (+0x10)
 REX_EXTERN(__imp__sub_8247B530);  // game time init: tick rate from the game globals (+0x1C)
 REX_EXTERN(__imp__sub_8284FD70);  // hkpCollisionDispatcher::initCollisionQualityInfo(this, input)
+REX_EXTERN(__imp__sub_8246E5A8);  // cinematic_clips_initialize_for_shot(shot)
 
 namespace {
 
@@ -196,6 +197,40 @@ extern "C" REX_FUNC(sub_8249FEB0) {
   for (int i = 0; i < 9; ++i) StoreBEFloat(GuestPtr(base, scratch + 4 * i), out[i]);
   ctx.r3.u64 = scratch;
   __imp__sub_8249FEB0(ctx, base);
+}
+
+// sub_8246E5A8(shot): cinematic_clips_initialize_for_shot. A shot's clip planes (+0x34 count,
+// +0x38 entries of 0x2C bytes: the plane, then the first and the last frame it applies to at
+// +0x18 and +0x1C, then the objects it clips) are copied into the cinematic globals (TLS +0x50:
+// +0x9C8 count, +0x9CC entries of 0x84 bytes) with the frames turned into game times by adding
+// the game time in ticks. The frames are the shot's 30 Hz camera frames (the shot starts when
+// this runs), so above 30 ticks a second a plane came on and went off too early: at 60 ticks
+// half way, at 144 after a fifth of its time. Here the copies are moved to the tick of their
+// frame, round(frame * tick rate / 30). At 30 ticks a second nothing changes.
+extern "C" REX_FUNC(sub_8246E5A8) {
+  __imp__sub_8246E5A8(ctx, base);
+  const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+  const uint32_t cinematic = LoadBE32(GuestPtr(base, tls + 0x50));
+  const uint32_t game_time = LoadBE32(GuestPtr(base, tls + 0x6C));
+  if (!cinematic || !game_time) return;
+  const uint8_t* gt = GuestPtr(base, game_time);
+  const int tick_rate = int16_t(gt[4] << 8 | gt[5]);
+  const int32_t count = int32_t(LoadBE32(GuestPtr(base, cinematic + 0x9C8)));
+  if (tick_rate == 30 || tick_rate <= 0 || count <= 0 || count > 32) return;
+  const int32_t now = int32_t(LoadBE32(GuestPtr(base, game_time + 0xC)));
+  for (int32_t i = 0; i < count; ++i) {
+    uint8_t* clip = GuestPtr(base, cinematic + 0x9CC + uint32_t(i) * 0x84);
+    const int32_t first = int32_t(LoadBE32(clip + 0x18)) - now;
+    const int32_t last = int32_t(LoadBE32(clip + 0x1C)) - now;
+    const auto at_tick = [&](int32_t frame) {
+      return now + int32_t(std::lround(double(frame) * tick_rate / 30.0));
+    };
+    StoreBE32(clip + 0x18, uint32_t(at_tick(first)));
+    StoreBE32(clip + 0x1C, uint32_t(at_tick(last)));
+    REXLOG_INFO("frame_rate: cinematic clip plane {} for frames {}-{}: ticks {}-{} from now ({} "
+                "ticks a second)", i, first, last, at_tick(first) - now, at_tick(last) - now,
+                tick_rate);
+  }
 }
 
 // --- The tick rate of synchronous network games ------------------------------------------------

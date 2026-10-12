@@ -59,7 +59,7 @@ Per 10 s window, and over the whole measurement in the summary:
 | `low1` | 1000 / mean of the slowest 1% of frame times ("1% low", fps) |
 | `stutters` | frames longer than 2 × that window's p50 |
 | `hitches` | frames longer than 100 ms |
-| `ontarget` | % of frames within ±20% of 33.3 ms (the 30 fps target); meaningless for `present` |
+| `ontarget` | % of frames within ±20% of the target frame time (1000 / `frame_rate`: 33.3 ms at 30 fps, 6.9 ms at 144); meaningless for `present` |
 | `pipelines` | graphics and compute pipelines the GPU plugin created in the window (guest shaders, render-target helpers): stutter from shader compilation shows here |
 
 The pipeline count leaves out the SDK presenter's own pipeline, which it rebuilds on every

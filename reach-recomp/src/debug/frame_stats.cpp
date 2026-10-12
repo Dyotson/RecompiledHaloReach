@@ -2,6 +2,7 @@
 
 #include "frame_stats.h"
 
+#include <rex/cvar.h>
 #include <rex/logging.h>
 
 #include <algorithm>
@@ -15,14 +16,21 @@
 #include <string>
 #include <vector>
 
+REXCVAR_DECLARE(int32_t, frame_rate);
+
 namespace reach::perf {
 namespace {
 
 using Clock = std::chrono::steady_clock;
 
 constexpr double kWindowSeconds = 10.0;
-constexpr double kTargetMs = 1000.0 / 30.0;  // Reach runs at 30 fps
 constexpr double kHitchMs = 100.0;
+
+// The frame time the game aims for: 1000 / frame_rate (33.3 ms at the console's 30 fps).
+double TargetMs() {
+  static const double ms = 1000.0 / std::max(30, int(REXCVAR_GET(frame_rate)));
+  return ms;
+}
 
 struct Config {
   bool enabled = false;
@@ -110,7 +118,7 @@ Stats Compute(std::vector<float> ms) {
   for (float f : ms) {
     if (f > 2.0 * s.p50) ++s.stutters;
     if (f > kHitchMs) ++s.hitches;
-    if (std::abs(f - kTargetMs) <= 0.2 * kTargetMs) ++on_target;
+    if (std::abs(f - TargetMs()) <= 0.2 * TargetMs()) ++on_target;
   }
   s.ontarget = 100.0 * on_target / double(n);
   return s;

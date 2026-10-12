@@ -163,10 +163,13 @@ but still ends at 46 s like at 60 Hz, the campaign, Firefight, matchmaking and S
 and players with different frame rates play together ("Network games with different frame
 rates", below).
 
-Beyond 60: the SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`), so
-this scheme tops out at 120 fps, and its VSync thread checks for due vblanks every 1 ms, so
-each vblank comes up to 1 ms late (p50 33.6 ms rather than 33.3 at 30 fps). 144 fps needs a
-288 Hz vblank (an SDK change) or a frame pacing that is not tied to whole vblanks.
+Beyond 60: `frame_rate` takes 30 or 60 to 240 (120 and 144 are the tested ones); the guest
+vblank runs at twice the frame rate, and the game ticks as often as it draws ("120 and 144
+fps", below). The SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`);
+SDK patch 0037 raises that to 480 Hz, so 144 fps (a 288 Hz vblank) needs the patched
+runtime; without it the game logs a warning and runs at 120. The SDK's VSync thread checks
+for due vblanks every 1 ms, so each vblank comes up to 1 ms late (p50 33.6 ms rather than
+33.3 at 30 fps).
 
 **`REACH_SYNCTRACE=FILE`** records the guest's kernel waits and signals (thread, handle,
 duration, guest call stack) for `REACH_SYNCTRACE_SECS` seconds (default 3) after
@@ -537,3 +540,24 @@ game once the tolerances matched.
   objects per dumped tick; `coop2.sh TAG "FLAGS_A" "FLAGS_B"` is a System Link Firefight co-op
   pair (A hosts) with dumps and side-by-side shots; `xexdiff.py`, `objfield.py`,
   `gdbwatch.sh` (a solo game with a gdb write watchpoint on one guest word).
+
+## 120 and 144 fps (in progress, 2026-10-12)
+
+`frame_rate = 120` or `144` runs a 240 or 288 Hz guest vblank (288 needs SDK patch 0037), so
+the game draws and ticks 120 or 144 times a second, by its own rule (tick rate = refresh /
+2). Work state, for whoever continues (the design discussion and the results will replace
+this):
+
+- Campaign opening at 144 (run folder `out/build/fr144`, runtime with 0037): 140-144 fps
+  through the intro and the cinematic, 1440 ticks per 10 s, one tick per frame; the opening
+  ends with its revert as at 60 (`game_reverted 4 tick(s) after the revert (tick rate 144)`:
+  `sleep 1` is 5 ticks there, the window round(144 / 30) = 5).
+- New: cinematic clip planes are moved to the tick of their 30 Hz frame (`sub_8246E5A8`,
+  `src/hooks/frame_rate.cpp`); the PERF `ontarget` uses 1000 / `frame_rate`.
+- `REACH_TICKAUDIT=1` (`src/debug/tick_audit.cpp`) logs each `game_seconds_to_ticks` call
+  site whose result passes 127, 255 or 32767 ticks: about 20 of its 427 call sites keep the
+  result in a byte (255 ticks: 8.5 s at 30, 1.77 s at 144) and ~150 in 16 bits (227 s at
+  144). The byte ones include the unit action timers (grenade throw and other animated
+  actions: the animation's length in ticks) and a 2 s hold of the predicted grenade count on
+  multiplayer clients (`sub_82394068`, 288 ticks: wraps to 32 at 144).
+

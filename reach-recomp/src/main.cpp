@@ -7,6 +7,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 
+#include <string>
 #include <string_view>
 
 REX_DEFINE_APP(reach, ReachApp::Create)
@@ -20,10 +21,19 @@ std::string ReachGpuBackend() { return REXCVAR_GET(gpu_backend); }
 // Reach draws a frame every 2 guest vblanks and schedules its render thread in vblanks, so
 // the frame rate follows the guest's vblank rate (docs/framerate.md).
 REXCVAR_DEFINE_INT32(frame_rate, 30, "Display",
-                     "Frame rate: 30 (the console's) or 60. 60 runs the guest vblank at 120 Hz; "
-                     "the game ticks at half the refresh rate, so it also simulates 60 ticks "
-                     "a second (docs/framerate.md)")
-    .validator([](std::string_view v) { return v == "30" || v == "60"; })
+                     "Frame rate: 30 (the console's), or 60 to 240 (60, 120, 144, ...). The "
+                     "guest vblank runs at twice the frame rate and the game ticks at half the "
+                     "refresh rate, so it simulates as many ticks a second as it draws frames; "
+                     "co-op over the network stays at 30 ticks (docs/framerate.md). Above 120 "
+                     "it needs SDK patch 0037")
+    .validator([](std::string_view v) {
+      int fps = 0;
+      for (char c : v) {
+        if (c < '0' || c > '9' || fps > 1000) return false;
+        fps = fps * 10 + (c - '0');
+      }
+      return fps == 30 || (fps >= 60 && fps <= 240);
+    })
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
@@ -41,6 +51,17 @@ void SetSdkCvarDefault(std::string_view name, std::string_view value) {
   REXLOG_WARN("SDK setting {} not found", name);
 }
 
+// The highest guest refresh rate the SDK runs: the video_mode_refresh_rate setting's range,
+// which VdQueryVideoMode clamps to as well (240 Hz, or 480 with SDK patch 0037).
+double MaxGuestRefreshHz() {
+  for (const rex::cvar::FlagEntry& entry : rex::cvar::GetRegistry()) {
+    if (entry.name == "video_mode_refresh_rate" && entry.constraints.max.has_value()) {
+      return *entry.constraints.max;
+    }
+  }
+  return 240.0;
+}
+
 }  // namespace
 
 void ApplyReachCvarDefaults() {
@@ -55,10 +76,22 @@ void ApplyReachCvarDefaults() {
   SetSdkCvarDefault("vulkan_allow_present_mode_immediate", "false");
   SetSdkCvarDefault("vulkan_allow_present_mode_mailbox", "false");
   SetSdkCvarDefault("vulkan_allow_present_mode_fifo_relaxed", "false");
-  // frame_rate = 60: twice the console's vblank rate. The game's frame limiter (2 vblanks),
-  // its render thread's schedule (a frame is shown 4 vblanks after its update starts), its
-  // frame time (vblanks / refresh rate) and its tick rate (refresh rate / 2) all scale with
-  // it; the intro video keeps its speed. A video_mode_refresh_rate set in reach.toml or on
-  // the command line wins. src/hooks/frame_rate.cpp keeps cinematics working at 60 ticks.
-  if (REXCVAR_GET(frame_rate) == 60) SetSdkCvarDefault("video_mode_refresh_rate", "120");
+  // frame_rate above 30: the guest vblank at twice the frame rate (60 fps: 120 Hz, 144 fps:
+  // 288 Hz). The game's frame limiter (2 vblanks), its render thread's schedule (a frame is
+  // shown 4 vblanks after its update starts), its frame time (vblanks / refresh rate) and its
+  // tick rate (refresh rate / 2) all scale with it; the intro video keeps its speed. A
+  // video_mode_refresh_rate set in reach.toml or on the command line wins.
+  // src/hooks/frame_rate.cpp keeps cinematics and scripts working at these tick rates.
+  const int fps = REXCVAR_GET(frame_rate);
+  if (fps > 30) {
+    int hz = 2 * fps;
+    const double max_hz = MaxGuestRefreshHz();
+    if (hz > max_hz) {
+      hz = int(max_hz);
+      REXLOG_WARN("frame_rate = {} needs a {} Hz guest vblank; this SDK runs at most {} Hz "
+                  "(SDK patch 0037 raises it to 480): running at {} fps",
+                  fps, 2 * fps, hz, hz / 2);
+    }
+    SetSdkCvarDefault("video_mode_refresh_rate", std::to_string(hz));
+  }
 }
