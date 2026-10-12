@@ -1,0 +1,26 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_video.cpp b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+index 642f7ff..04f97b7 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_video.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+@@ -51,7 +51,7 @@ void ConfiguredVideoMode(uint32_t& width, uint32_t& height) {
+ }
+ 
+ float GetConfiguredVideoModeRefreshRate() {
+-  double refresh_rate_hz = std::clamp(REXCVAR_GET(video_mode_refresh_rate), 24.0, 240.0);
++  double refresh_rate_hz = std::clamp(REXCVAR_GET(video_mode_refresh_rate), 24.0, 480.0);
+   return float(refresh_rate_hz);
+ }
+ 
+diff --git a/src/ui/window.cpp b/src/ui/window.cpp
+index 7795c1e..0bbf69a 100644
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -63,7 +63,7 @@ REXCVAR_DEFINE_STRING(resolution, "", "Display",
+ 
+ REXCVAR_DEFINE_DOUBLE(video_mode_refresh_rate, 60.0, "Display",
+                       "Guest video mode refresh rate in Hz")
+-    .range(24.0, 240.0)
++    .range(24.0, 480.0)
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
+ namespace rex {

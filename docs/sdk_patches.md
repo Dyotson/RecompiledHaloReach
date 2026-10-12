@@ -5,7 +5,7 @@ The ReXGlue SDK's Xenos GPU emulation is a port of Xenia from around early Decem
 (rexglue/rexglue-sdk#456), so fixes live in `patches/rexglue-sdk/` and
 `tools/build_rexglue_sdk.sh` builds a patched `librexgpu-xenos.so` from them (see
 `docs/PROJECT.md` > Tooling). One patch (0025) is in the CPU code generator instead: the
-script also builds a patched `rexglue` (and, for the XAM/kernel patches 0026-0027 and the memory patch 0028, a patched `librexruntime.so`), and the reach build runs codegen with it. Most of
+script also builds a patched `rexglue` (and, for the XAM/kernel patches 0026-0027, the memory patch 0028, the wait patch 0033 and the refresh rate patch 0037, a patched `librexruntime.so`), and the reach build runs codegen with it. Most of
 them are Xenia fixes the SDK never got; a few are porting slips. Every patch says "as in Xenia" in its comments and was checked against
 Xenia Canary `82d0cd1f4`, the build we use as the reference.
 
@@ -41,6 +41,7 @@ Xenia Canary `82d0cd1f4`, the build we use as the reference.
 | 0033 | Threading (POSIX) | `WaitMultiple` (WaitAny/WaitAll on several handles) polled: it tried to lock every handle and slept 1 ms, over and over, so the Audio Worker (nine handles, mostly idle) used ~75% of a core; it now sleeps on one global condition variable that every signal wakes (20 ms cap as a safety net) | Audio Worker 79% -> 1% of a core (Reach menu), 80% -> 13% (Forza menu) |
 | 0034 | Vulkan tessellation shaders | The GLSL the SDK generates for the tessellation vertex and hull shaders declared the system constants at set 0, binding 0. That binding is the shared memory storage buffer; the constants are at set 1, binding 0. Tessellation factors and index bounds came from guest memory at those offsets | most likely the GPU hang of the water and of `experimental/0014` (the water is not retested; see `docs/rendering.md`) |
 | 0035 | Primitive processor | Tessellated triangle strips and fans were rejected ("Unsupported tessellation mode 0 for primitive type 6"). They are now drawn as triangle lists, auto-indexed and indexed (Xenia 3eab2b8b39 does auto-indexed only). `--tessellated_strips_and_fans_as_lists=false` drops them as before | black skin on Carter's and Kat's faces in cinematics (their faces are indexed discrete-tessellated strips). **Fixed** |
+| 0037 | Video mode (runtime) | The guest refresh rate (`video_mode_refresh_rate`, its range and `VdQueryVideoMode`'s clamp) may go up to 480 Hz instead of 240 (Forza Horizon's patch 0037, the same file) | `frame_rate = 144` needs a 288 Hz guest vblank: Reach draws a frame every 2 vblanks and ticks at half the refresh rate (`docs/framerate.md`). Without it the SDK clamps 288 to 240 Hz and the game runs 120 fps |
 
 The former `experimental/0014` (tessellated triangle strips/fans as lists) is now 0035. It hung the
 GPU, most likely because of the binding fixed by 0034: with 0034 the same draws run fine.
