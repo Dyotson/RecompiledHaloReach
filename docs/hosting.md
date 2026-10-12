@@ -38,3 +38,12 @@ Unraid: copy `server/` to `/mnt/user/appdata/reach-live/src`, build there with
 
 There are no admin endpoints. Players are not authenticated (their XUID is whatever the
 client claims); this is a trust-your-friends server.
+
+## Matchmaking files
+
+The Playlist screen needs the matchmaking title-storage files in `DATA_DIR/storage/` (and
+the game types in `DATA_DIR/fileshare/`). They are built from your own copy of the game,
+so they are not in the repository: generate them with `server/reach_live_hoppers.py`
+(docs/online_plan.md section 5.4), then copy `storage/` and `fileshare/` into the
+server's data directory. Without them the game reports "the Halo: Reach server is
+unavailable" on the Matchmaking screen.
