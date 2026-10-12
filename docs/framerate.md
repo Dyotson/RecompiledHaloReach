@@ -466,6 +466,15 @@ thrown by the 30 fps one, seen, no kill). Grenades at range, vehicles and the 30
 client direction, matchmaking and campaign co-op are still open (paused: low memory).
 In this input mapping LT throws a grenade (LB does nothing).
 
+Same run the other way (30 fps host, 60 fps client, Slayer on Sword Base, 7 min, 40 s of the
+players placed 2.5 m apart): no error; clocks equal on both machines at every sample (6:44,
+5:52, 4:34), scores equal (1-2), positions again within a median 4 mm (p95 4.4 cm, max 8 cm).
+
+**Mixed matchmaking (2026-10-12, local Reach Live server, Team Slayer / Classic Slayer on
+Countdown).** 60 fps (Alpha) and 30 fps (Jun) searched, found each other in about 60 s, played
+the 1-minute game (both in the same game, clocks equal, scoreboard shown), and searched again,
+no error. The 30 fps side saw the session first (1 session, the 60 fps one 0, then both).
+
 **Not checked yet** (next steps for mixed play):
 - Campaign co-op at mixed rates (only Firefight was run), and co-op through Reach Live
   instead of System Link (same game code, other transport).
