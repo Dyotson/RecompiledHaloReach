@@ -278,3 +278,33 @@ only the executable-folder `librexgpu-xenos.so` differs (the 0035 build with
 No measurable cost: both hold 60 fps with p99 within 0.2 ms. (The earlier "0034 only" plugin build
 in `bin34` lost the GPU, VK_ERROR_DEVICE_LOST, 4 s into this scene, so 0034 without 0035 is not a
 usable baseline.) The 0035 run started with another game alive on the machine, so its max is noisier.
+
+## GPU emulation at high refresh rates: render pass breaks and the submission thread (in progress, 2026-10-12)
+
+Goal: Forza races above 60 fps (75.7 fps at a 120 target, 70.1 at 144; free roam 111-115) are
+bound by the emulated GPU's command processor (CP). Work state, for whoever continues:
+
+- **Trees.** `~/rexglue-sdk-src-gpu/sdk`, branch `fz37` (Forza's patch set 0001-0037 committed as
+  `dc567b4`, then one WIP commit per change); `sdk-reach`, branch `reach35` (Reach's set,
+  `a97941d`); `sdk-fp` is the profiling build (frame pointers + counters from
+  `~/rexglue-sdk-src-gpu/instr/instr.py` and `instr_extra.py`: render pass begins, uploads by
+  caller and whether a draw in the current render pass had read the uploaded pages, replay
+  time on the CP and on the submission thread). Scripts in the session scratchpad `gpu-perf/`:
+  `build_sdk.sh`, `build_pair.sh NAME` (std + instrumented plugin), `build_reach_pair.sh`,
+  `fzb.sh race|freeroam DIR PLUGIN FR` (Forza snapshot binary `forza-recomp/out/build/gp-snap37`
+  copied into `gp2-<plugin>` with the plugin; refuses below 12 GB available), `runset.sh SETFILE`.
+- **Changes (cvars, both default on):** `vulkan_hoist_shared_memory_uploads` (an upload of
+  pages that no draw in the current render pass has read is recorded before the render pass,
+  sharing one barrier pair with the other uploads hoisted there, instead of ending the render
+  pass for a copy between two barriers) and `vulkan_threaded_submission` (the deferred command
+  buffer is replayed into Vulkan and submitted on a "Vulkan Submission" thread). Not yet
+  measured.
+- **First counters** (instrumented base plugin, Forza loading into free roam at 144, CP busy
+  99.7%): 250,000 draws/s, 14,500 render pass instances/s, 34,000 barriers/s, 18,000
+  dispatches/s; only ~700 vertex/index uploads/s happened inside a render pass, none of them on
+  pages a draw in that render pass had read; replaying the deferred command buffer took 7.9% of
+  the CP thread.
+- **Machine hazard found:** the kernel's TTM page pool (`GPUReclaim` in `/proc/meminfo`) grew to
+  16 GB (its cap, half of RAM) over many game runs; with zram nearly full, amdgpu command
+  submission failed with ENOMEM and the game lost its device (`Not enough memory for command
+  submission` in the kernel log). Check `GPUReclaim` and `MemAvailable` before launching.

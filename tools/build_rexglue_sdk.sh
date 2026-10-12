@@ -44,14 +44,32 @@ git -C "$SRC" fetch --quiet origin "$SDK_COMMIT" 2>/dev/null || true
 git -C "$SRC" checkout --quiet "$SDK_COMMIT"
 git -C "$SRC" submodule update --init --recursive --depth 1 --quiet
 
+# Apply the patch series idempotently: build the patched tree (the SDK commit plus every
+# patch, in a temporary index), then rewrite only the files whose content differs from it.
+# Patches are not checked one by one against the working tree: later patches change the
+# context of earlier ones (0035 that of 0018), so on a clone with the whole series applied
+# neither the forward nor the reverse check of 0018 passes. Files that already match keep
+# their timestamps, so a re-run rebuilds nothing; a changed, added or dropped patch rewrites
+# just the files it touches.
+patched_index="$(mktemp)"
+GIT_INDEX_FILE="$patched_index" git -C "$SRC" read-tree "$SDK_COMMIT"
 for patch in "$ROOT"/patches/rexglue-sdk/*.patch; do
-    if git -C "$SRC" apply --reverse --check "$patch" 2>/dev/null; then
-        echo "already applied: $(basename "$patch")"
-    else
-        git -C "$SRC" apply "$patch"
-        echo "applied: $(basename "$patch")"
+    if ! GIT_INDEX_FILE="$patched_index" git -C "$SRC" apply --cached "$patch"; then
+        echo "patch does not apply to $SDK_COMMIT: $(basename "$patch")" >&2
+        rm -f "$patched_index"; exit 1
     fi
 done
+GIT_INDEX_FILE="$patched_index" git -C "$SRC" update-index -q --refresh > /dev/null || true
+changed="$(GIT_INDEX_FILE="$patched_index" git -C "$SRC" diff-files --ignore-submodules --name-only)"
+if [ -z "$changed" ]; then
+    echo "patches already applied ($(ls "$ROOT"/patches/rexglue-sdk/*.patch | wc -l) in patches/rexglue-sdk)"
+else
+    while IFS= read -r file; do
+        GIT_INDEX_FILE="$patched_index" git -C "$SRC" checkout-index -f -- "$file"
+        echo "patched: $file"
+    done <<< "$changed"
+fi
+rm -f "$patched_index"
 [ "$SOURCE_ONLY" = 0 ] || exit 0
 
 # Building the SDK needs X11/XCB and Wayland headers (its UI module and SDL3
