@@ -410,6 +410,16 @@ Check exact param names in `endpoints.json` before calling.
   never swapped the plugin. Details: `docs/rendering.md`. Open there: Falcon "back and forth"
   check at 60 (one suspicious burst in the formation flight, 30 fps and START-skip runs not
   done), and faces on/off perf numbers.
+- 2026-10-12: **Cinematic cameras move at 60 Hz (Falcon flight flicker fixed).** At
+  `frame_rate = 60`, the near Spartans in Winter Contingency's Falcon flight vanished on
+  alternate frames and the cabin jumped back and forth; 30 fps was clean. Cause: a cinematic
+  scene shot's camera is a list of 30 Hz frames picked by `(int)(ticks * seconds_per_tick *
+  30)`, so the camera moved on every other tick while the Falcon moved on every tick, and
+  trailed it by 0.4 m on alternate frames. Occlusion queries and clip planes were ruled out.
+  `src/hooks/frame_rate.cpp` blends the camera between two frames (`sub_8249FEB0`). Now
+  clean in two 60 fps runs, and gameplay after the flight works. New tools:
+  `REACH_CINEREC` (per-frame records of thread-global blocks and cinematic objects,
+  `src/debug/sync_diff.cpp`) and `tools/cinerec.py`. Details: `docs/rendering.md`.
 
 ## Debugging recipes
 
@@ -460,6 +470,11 @@ Check exact param names in `endpoints.json` before calling.
 - Frame dumps without screenshots: `REACH_FRAMEDUMP=20,28` + `--vulkan_readback_resolve=true`, then
   `tools/frame_to_png.py`. `REACH_FRAMEDUMP_BURST_TRIGGER=<file>` dumps `REACH_FRAMEDUMP_BURST`
   (default 60) consecutive frames each time the file appears, to check motion frame by frame.
+- What changes from one frame to the next in game state: `REACH_CINEREC=FILE`, then `touch
+  FILE.trigger`. It records thread-global blocks (cinematic, observer, director, scripted
+  camera, game time, or any `REACH_CINEREC_BLOCKS="off:size,..."`) and the cinematic's object
+  positions after each main-thread frame. Read it with `tools/cinerec.py FILE flips|steps`.
+  This is how the 30 Hz cinematic camera was found (`docs/rendering.md`).
 - Comparing GPU plugins: the SDK loads `librexgpu-xenos.so` from the executable's folder only;
   `REXSDK` switches `librexruntime.so`, not the plugin. Copy `reach`, the `reach_*` module
   libraries and the plugin into a folder and start it there (`docs/rendering.md`). Texture binding trace: `REACH_TEXTRACE=1`. Live guest memory: `tools/guestmem.py`.

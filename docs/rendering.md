@@ -71,29 +71,93 @@ Lavapipe (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) runs t
 the intro video, but takes more than 10 s per frame in the 3D cinematic. It is too slow to
 check a shot, but safe for anything that could hang the GPU.
 
-## Cutscene "Falcons jumping back and forth" (2026-10-12: partly explained)
+## Cutscene "Falcons jumping back and forth" (fixed 2026-10-12 in `src/hooks/frame_rate.cpp`)
 
-Setup: opening cinematic, `frame_rate = 60` and 30, one tick per frame, only the two normal
-end-of-cinematic reverts. Bursts of 150 consecutive frame dumps checked with `burst_motion.py`.
+**Symptom (60 fps only).** In the formation flight of Winter Contingency's opening cinematic,
+the Spartan nearest the camera disappears on alternate frames, in runs of 1-3 frames, and
+the cabin around it jumps back and forth. The background and the other Falcon move smoothly.
+In the bad frames the camera sits behind the cabin's door frame, which then fills the left of
+the picture. At 60 fps it happens in every shot of the flight with a Spartan close to the
+camera: the cabin shot, the helmet close-ups and the gunner. It is not a second camera angle:
+both images look the same way, from points about 0.4 m apart.
 
-- **The flagged burst is real, not a flash.** In the cabin scene of the Falcon flight (about 2 s into
-  the formation flight; same scene again at t=331 in a second 60 fps run) a foreground object (a
-  Spartan in blue armour in the near seat, Carter in the first run) is drawn on one frame and
-  absent on the next, in runs of 1-3 frames, while the background and the far Spartans move
-  smoothly. In the first run the whole shot also alternated with a second angle on every frame.
-  The two frames differ by ~28 mean grey levels, so players see it as flicker and objects
-  vanishing. Reproduced at 60 fps in two runs (103/150 and 27/150 flagged frames); other bursts
-  at 60 (takeoff, ship interior, flight) are clean (0-5 flags, cut frames).
-- **30 fps:** six bursts through the briefing and flight (150 frames each) show no alternation
-  (0-9 flags, all repeated frames). They did not land on the cabin shot, so 30 fps is not proven
-  clean for that scene; a full 30 fps run reached gameplay without visible problems.
-- **START at Jorge's shot** (60 fps) opens the pause menu ("Game Paused", Revert to last save...);
-  it is not a skip and does not revert. No jumping from it.
-- Likely area (not investigated): an object or camera drawn from stale or alternating
-  state on every other frame at 60 fps, i.e. the tick/interpolation path (`src/hooks/frame_rate.cpp`)
-  or a double-buffered render-state copy; check by running the same scene at 30 with a burst
-  timed to the cabin shot (`motion2.sh` with `OFF`/`STEP`), and by comparing object transforms
-  (guest memory) on consecutive frames.
+**Measurements** (frame dumps from guest memory, bursts of 150 consecutive frames from the
+start of the flight, `abpat.py` labels each frame by the image it matches):
 
-Scripts (session scratchpad `faces/`, may be gone): `motion.sh`/`motion2.sh TAG FR` (run with
-GSTRACE and periodic bursts), `burst_motion.py DIR` (d1/d2 detector, PNGs), `bench_ab.sh`.
+| Run | Bursts | Result |
+| --- | --- | --- |
+| 30 fps (`fl30b`) | 6 (30 s of the flight, including the cabin shot and the close-ups) | clean: the only changes are the shot cuts |
+| 60 fps, occlusion queries off (`fl60noq`) | 5 | alternation in 3 bursts (125 flagged frames) |
+| 60 fps (`fl60cr`) | 5 | alternation in 4 bursts |
+| 60 fps with the fix (`fl60fix`) | 5 (12 s) | clean: 0-2 flags a burst, all at shot cuts |
+
+**Ruled out.** Occlusion queries: with `--occlusion_query_enable=false` (every query
+"visible") the alternation is the same. Reach does use them, but for BSP instances
+(`sub_82163668` reads them, `sub_821674E0` issues a box query) and screen effects
+(`sub_821AD720`, by type mask), not for objects. Cinematic clip planes (`sub_820D4A98`
+logged 0 planes all through the flight). Ticks per frame: one tick in 1198 of 1200 frames.
+
+**Cause.** The camera of a cinematic scene shot is a list of frames at 30 a second: position,
+forward and up, 36 bytes each, in the shot (`0xD0` bytes, scene tag +0x30) at +0xBC, with the
+count at +0xB8. The scripted camera's tick (`sub_820C2938`, mode 5; scripted camera globals at
+thread globals +0x44) counts the ticks since the scene started (+0x60). It takes the frame
+`(int)(ticks * seconds_per_tick * 30)` (+0x4C, and +0x48 within the shot). The director's
+camera update (`sub_8249ED18`, through the vtable thunk `sub_824A0260`) then builds the camera
+from that frame (`sub_8249FEB0`). At 60 ticks a second the frame changes on every other tick.
+The cinematic's objects (the Falcon and its passengers) move on every tick. Recorded with
+`REACH_CINEREC` (below): the observer camera (observer globals +0x10) moved 0.86, 0, 0.86,
+0 m per tick, and the objects 0.43 m on every tick. The Falcon flies at about 26 m/s.
+
+So on every other tick the camera lags the scene by 0.43 m. In these shots that is enough to
+put it behind the cabin wall: the near Spartan is cut by the near plane and the door frame
+comes into view. The camera's per-tick velocity (observer +0x3D0, scripted camera +0xAC)
+alternated between twice its value and 0.
+
+**Fix.** A hook on `sub_8249FEB0` works at tick rates above 30, when the scripted camera
+plays a scene shot (mode 5). It replaces the frame passed in with a blend of that frame and
+the next. The blend fraction is the part the game's truncation dropped:
+`ticks * seconds_per_tick * 30 - frame`. Forward and up are blended, normalized and made
+orthogonal again. There is no blend at a shot's last frame, nor across a jump of more than
+4 m or about 25 degrees (a cut inside a shot). At 30 ticks a second the fraction is 0, so
+nothing changes. `REACH_CINEMATIC_CAMERA_STEPS=1` brings back the old steps for comparisons.
+
+With the fix, the camera and the objects both move 0.43 m on every tick. The objects'
+positions relative to the camera change by 0.005 m a tick or less (`fl60fix`). The pictures
+match the 30 fps run shot for shot, with the near Spartans in place.
+
+**Evidence** (session scratchpad, not in the repo):
+- `scratchpad/fl/before_after_flight.png`: 8 consecutive frames of a helmet close-up, before
+  and after.
+- Run folders `/var/home/dyotson/faces_r/fl*`: frame thumbnails in `bpng/`, `bursts.txt`,
+  `cine.rec`, `reach.log`.
+
+**Left over.**
+- The scripted camera's velocity (+0xAC..+0xB4) is the position change times 30. At 60 it
+  is half the real speed. `sub_8249ED18` uses it when it blends out of a cinematic camera
+  (+0x68 == 2). Not seen to matter yet.
+- Cinematic clip planes (`cinematic_clips_initialize_for_shot`, `sub_8246E5A8`) add the
+  shot's start and end values to the game time in ticks. If those values are 30 Hz frames,
+  a clip plane is active for only half its time at 60. This is unverified: the flight has no
+  clip planes. The render side is `sub_820D4A98` (plane on while start <= time < end) and
+  `sub_821732D0` (each listed object's plane mask).
+- The other camera modes interpolate already: animated cameras (`camera_set_animation`, mode
+  3, `sub_8249FBD8`) sample their animation at a fractional time.
+
+**Tools.**
+- `REACH_CINEREC=FILE` (`src/debug/sync_diff.cpp`): touch `FILE.trigger` to record the next
+  `REACH_CINEREC_FRAMES` main-thread frames. Each record has the game time, the ticks, the
+  guest frame count, thread-global blocks (cinematic, observer, director, scripted camera,
+  game time) and the cinematic's objects (handle and bounding-sphere centre). While it
+  records, it also logs each view's clip planes (`CINEREC clip`).
+- `tools/cinerec.py FILE flips|steps|word|summary` reads the file. `flips` finds the words
+  that go A B A; `steps` prints how far the camera and the objects moved per frame.
+- Frame dumps now carry the guest frame count (`"swap"` in the JSON), to line them up with
+  the records.
+- Scratch scripts (session scratchpad `fl/`, may be gone):
+  - `motion3.sh`/`motion4.sh TAG FR`: the campaign up to the flight, then back-to-back
+    bursts and a CINEREC recording; `BIN=` selects the run folder.
+  - `motion5.sh`: the same, then into gameplay (`AFTER=` shots).
+  - `ana.py DIR`: converts the bursts with the C untiler `untile` and deletes the `.bin`
+    files.
+  - `abpat.py DIR`: labels each frame by the image it matches.
+- **START at Jorge's shot** (60 fps) opens the pause menu ("Game Paused"). It is not a skip.

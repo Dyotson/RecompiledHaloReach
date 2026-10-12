@@ -24,6 +24,10 @@ bool Enabled();
 // A guest frame was handed to VdSwap.
 void OnGuestFrame();
 
+// Guest frames handed to VdSwap so far (counted also without RECOMP_PERF), to line up
+// frame dumps with main-thread records (sync_diff.cpp, REACH_CINEREC).
+uint32_t GuestFrameCount();
+
 // The host presenter called vkQueuePresentKHR.
 void OnHostPresent();
 

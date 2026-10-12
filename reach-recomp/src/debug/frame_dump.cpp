@@ -150,9 +150,10 @@ void DumpFrontBuffer(uint8_t* base, uint32_t fetch_addr, double seconds, const s
   if (FILE* f = std::fopen((stem + ".json").c_str(), "w")) {
     std::fprintf(f,
                  "{\"width\": %u, \"height\": %u, \"aligned_width\": %u, \"aligned_height\": %u, "
-                 "\"format\": %u, \"tiled\": %s, \"address\": %u, \"seconds\": %.2f}\n",
+                 "\"format\": %u, \"tiled\": %s, \"address\": %u, \"seconds\": %.2f, "
+                 "\"swap\": %u}\n",
                  width, height, aligned_width, aligned_height, format, tiled ? "true" : "false",
-                 address, seconds);
+                 address, seconds, reach::perf::GuestFrameCount());
     std::fclose(f);
   }
   REXLOG_INFO("REACH_FRAMEDUMP: t={:.2f}s {}x{} fmt={} tiled={} addr={:#x} -> {}.bin", seconds,

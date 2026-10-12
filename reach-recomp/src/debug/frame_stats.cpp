@@ -194,7 +194,14 @@ Stream& Present() {
 
 bool Enabled() { return GetConfig().enabled; }
 
+namespace {
+std::atomic<uint32_t> guest_frames{0};
+}  // namespace
+
+uint32_t GuestFrameCount() { return guest_frames.load(std::memory_order_relaxed); }
+
 void OnGuestFrame() {
+  guest_frames.fetch_add(1, std::memory_order_relaxed);
   if (!Enabled()) return;
   const Clock::time_point now = Clock::now();
   Guest().OnFrame(now);

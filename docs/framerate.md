@@ -251,6 +251,15 @@ The 30 fps control run is unchanged (no such line; same reverts at the same poin
 `XmaContext 127: There are no bits to copy!` error shows up once in the opening at both 30
 and 60.
 
+**Cinematic cameras moved at 30 Hz; fixed (2026-10-12).** A cinematic scene shot's camera
+is a list of 30 Hz frames. The scripted camera picks frame `(int)(ticks * seconds_per_tick *
+30)`, so at 60 ticks a second it moved on every other tick only, while the objects it films
+moved on every tick. In the Falcon flight the camera then trailed the Falcon by 0.4 m on
+every other frame: the near Spartans dropped out and the cabin jumped back and forth.
+`src/hooks/frame_rate.cpp` now blends the camera between that frame and the next
+(`sub_8249FEB0`). Details: `docs/rendering.md`. Other places that count 30 Hz frames against
+ticks are listed there under "Left over".
+
 **Campaign after the Falcon (60).** Out of the Falcon, walking, turning, firing and reloading the
 assault rifle, "Loading... done", "Checkpoint... done". Game time 600 ticks per 10 s of wall
 time (`REACH_GSTRACE=1` logs `clock time=... rate=...` every 10 s); no other reverts than the
