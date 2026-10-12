@@ -572,7 +572,9 @@ Three ways to get 144 frames a second:
    (`sub_823BDB98`, `sub_823BDE60`, `sub_823BE420`, `sub_82418610`), and 20 calls that store
    `game_seconds_to_ticks` in a byte without a clamp (the animation lengths of unit actions,
    the 2 s hold of a multiplayer client's predicted grenade count, `sub_82394068`, which is 288
-   ticks at 144 and wraps to 32). A signed byte holds 127 ticks: 4.2 s on the console, 2.1 s at
+   ticks at 144 and wraps to 32), and code that computes ticks itself: `sub_822175E0` stores
+   2 s as `(char)(tick rate << 1)` in the player (+0x24A, counted down by `sub_821EE680`): 60
+   on the console, 144 at 72 ticks, 288 = 32 (0.22 s) at 144. A signed byte holds 127 ticks: 4.2 s on the console, 2.1 s at
    60, 1.76 s at 72, 0.88 s at 144. A static scan finds 21 more functions with byte tick
    counters next to the tick rate; a complete audit of the engine's byte fields is not
    feasible, so 144 ticks would leave actions longer than 0.88 s broken in ways nobody has
