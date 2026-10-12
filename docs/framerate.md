@@ -578,7 +578,11 @@ Three ways to get 144 frames a second:
    60, 1.76 s at 72, 0.88 s at 144. A static scan finds 21 more functions with byte tick
    counters next to the tick rate; a complete audit of the engine's byte fields is not
    feasible, so 144 ticks would leave actions longer than 0.88 s broken in ways nobody has
-   listed.
+   listed. Measured on a grenade throw in Firefight at 144 fps (the action block read from
+   guest memory every 2 ms, `actsample.py` in the session scratchpad): with 144 ticks the
+   throw's release tick is 38 but its length and the lock time are 192 and 168 ticks, stored
+   as -64 and -88, so the player's action lock (`players + 0x88`) is never set; with 72 ticks
+   they are 19, 91 and 84, all in range.
 2. **30 or 60 ticks and an interpolating renderer** (what MCC's PC Reach does). The Xbox 360
    build has nothing to build on: nothing reads the game time's leftover tick fraction
    (+0x14), and the per-frame updates after the ticks (`sub_82440410`: player control and the
@@ -616,3 +620,14 @@ uneven 60 ticks at 144 fps (2 or 3 frames per tick) was not chosen for that reas
   (`TICKAUDIT: call ...`). In the campaign opening, the flight and a few minutes of play at 144
   ticks no byte site passed 127; 16-bit sites got up to 3258 ticks.
 - The PERF `ontarget` uses 1000 / `frame_rate`.
+
+### Checks at 144 fps with 72 ticks (2026-10-12, contended, headless)
+
+- **Firefight** (solo, last lobby settings of the profile copy): plays with 72 ticks a second
+  (`frame_rate: game start (network type 1): 72 ticks a second instead of 144`), two frames
+  per tick (708 frames without a tick and 712 with one per 10 s), Havok stepping 1/72 s with
+  the 1/30 s tolerances. Firing, grenade throws (release at tick 19 of 91, 0.26 s, as at
+  144 ticks' 38), melee, death and the loadout respawn. Projectiles from the Covenant (type 5
+  objects tracked in guest memory) fly 11.8 wu/s on average at both 72 and 144 ticks: speed
+  per second does not depend on the tick rate.
+
