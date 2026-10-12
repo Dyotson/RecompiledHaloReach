@@ -21,6 +21,26 @@ ITEM_SIZE = 0x298         # file share item: a content header (chdr) without thr
 METADATA_SIZE = 0x2B0     # s_content_item_metadata, the `chdr` chunk payload after 4 bytes
 SLOTS = 24                # file share slots per player
 QUOTA = 100 << 20         # bytes per player
+MAX_FILE = 32 << 20       # bytes of one shared file (uncompressed: MAX_INFLATED)
+MAX_INFLATED = 64 << 20
+MAX_PENDING = 8           # unfinished uploads per player
+PENDING_AGE = 3600        # seconds before an unfinished upload is forgotten
+DISK_CAP = int(os.environ.get("REACH_LIVE_DISK_CAP_MB", "4096")) << 20  # all shared files
+_usage = [0.0, 0]
+
+
+def disk_usage():
+    """Bytes of all shared files (rescanned every 30 s)."""
+    if time.monotonic() - _usage[0] > 30:
+        total = 0
+        for root, _, names in os.walk(os.path.join(_data_dir, "fileshare")):
+            for name in names:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except OSError:
+                    pass
+        _usage[0], _usage[1] = time.monotonic(), total
+    return _usage[1]
 
 _lock = threading.Lock()
 _data_dir = "reach_live_data"
@@ -69,9 +89,10 @@ def item_from_metadata(metadata):
 
 def u64(query, key):
     try:
-        return int(query.get(key, ["0"])[0], 16)
+        value = int(query.get(key, ["0"])[0], 16)
     except ValueError:
         return 0
+    return value if 0 <= value < 1 << 64 else 0
 
 
 # --- Replies -------------------------------------------------------------------------
@@ -126,12 +147,26 @@ def new_upload(query):
     xuid = u64(query, "shareId") or u64(query, "userId")
     server_id = random.getrandbits(63) | 1
     pending = {"server_id": server_id, "unique_id": "%016X" % u64(query, "uniqueId"),
-               "file_type": query.get("fileType", ["0"])[0],
+               "file_type": query.get("fileType", ["0"])[0][:8],
                "size": int(query.get("compressedSize", ["0"])[0] or 0),
                "uncompressed_size": int(query.get("uncompressedSize", ["0"])[0] or 0),
                "created": int(time.time())}
+    if not xuid or not 0 < pending["size"] <= MAX_FILE or not 0 <= pending["uncompressed_size"] <= MAX_INFLATED:
+        return 400, "text/plain", b"bad upload"
     with _lock:
         index = load_index(xuid)
+        index.setdefault("files", [])
+        now = int(time.time())
+        waiting = index.setdefault("pending", {})
+        for sid in [k for k, p in waiting.items() if now - p.get("created", 0) > PENDING_AGE]:
+            del waiting[sid]
+        while len(waiting) >= MAX_PENDING:  # the oldest unfinished upload makes room
+            del waiting[min(waiting, key=lambda k: waiting[k].get("created", 0))]
+        if len(index["files"]) >= SLOTS:
+            return 400, "text/plain", b"share full"
+        if (sum(f.get("size", 0) for f in index["files"]) + pending["size"] > QUOTA
+                or disk_usage() + pending["size"] > DISK_CAP):
+            return 400, "text/plain", b"quota reached"
         index.setdefault("pending", {})["%016X" % server_id] = pending
         save_index(xuid, index)
     log.info("files %016X new upload %016X (%s)", xuid, server_id, pending)
@@ -163,7 +198,11 @@ def parse_chunks(data):
         if fourcc == b"_cmp":
             for skip in range(0, 8):  # a small header precedes the zlib stream
                 try:
-                    out += parse_chunks(zlib.decompress(payload[skip:]))
+                    inflater = zlib.decompressobj()
+                    data = inflater.decompress(payload[skip:], MAX_INFLATED)
+                    if inflater.unconsumed_tail:
+                        break  # a decompression bomb
+                    out += parse_chunks(data)
                     break
                 except zlib.error:
                     continue
@@ -203,6 +242,8 @@ def upload_data(query, body, headers):
     xuid = u64(fields, "shareId") or u64(fields, "userId")
     server_id = u64(fields, "serverId")
     start = int(fields.get("startPosition", ["0"])[0] or 0)
+    if not 0 <= start <= MAX_FILE:
+        return 400, "text/plain", b"bad position"
     data = max((v for k, v in parts.items() if k not in fields or len(v) >= 64),
                key=len, default=b"")
     log.info("files %016X upload %016X at %d: %d bytes (parts %s)", xuid, server_id, start,
@@ -213,6 +254,11 @@ def upload_data(query, body, headers):
         if pending is None:
             return 404, "text/plain", b"no such upload"
         path = file_path(xuid, server_id)
+        if start + len(data) > min(MAX_FILE, pending["size"] or MAX_FILE):
+            return 400, "text/plain", b"upload larger than announced"
+        if disk_usage() + len(data) > DISK_CAP:
+            return 400, "text/plain", b"quota reached"
+        _usage[1] += len(data)
         os.makedirs(share_dir(xuid), exist_ok=True)
         with open(path, "r+b" if os.path.exists(path) else "wb") as f:
             f.seek(start)
@@ -282,7 +328,7 @@ def download(query):
     xuid, entry = find_file(server_id)
     if entry is None:
         return 404, "text/plain", b"not found"
-    start = int(query.get("startPosition", ["0"])[0] or 0)
+    start = max(0, int(query.get("startPosition", ["0"])[0] or 0))
     with open(file_path(xuid, server_id), "rb") as f:
         f.seek(start)
         data = f.read()

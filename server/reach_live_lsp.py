@@ -108,8 +108,15 @@ def load_player(xuid):
         return {}
 
 
+MAX_PLAYERS = int(os.environ.get("REACH_LIVE_MAX_PLAYERS", "20000"))  # player records on disk
+MAX_PRESENCE = 4096
+
+
 def save_player(xuid, record):
     path = player_path(xuid)
+    if not os.path.exists(path) and len(os.listdir(os.path.dirname(path))) >= MAX_PLAYERS:
+        log.warning("player limit reached: %016X not saved", xuid)
+        return
     with open(path + ".tmp", "w") as f:
         json.dump(record, f, indent=1)
     os.replace(path + ".tmp", path)
@@ -177,6 +184,8 @@ def heartbeat(body):
         for i in range(min(payload[1], 4)):
             (xuid,) = struct.unpack_from(">Q", payload, 2 + 0x38 * i)
             if xuid:
+                if len(presence) >= MAX_PRESENCE and xuid not in presence:
+                    presence.pop(min(presence, key=lambda k: presence[k][0]))
                 presence[xuid] = (time.time(), payload)
     return 200, "application/octet-stream", blf(chunk(b"phbr", 2, 1, bytes(0x93)))
 
