@@ -74,12 +74,12 @@ set(REACH_SOURCES
     src/debug/sync_diff.cpp
     src/debug/sync_trace.cpp
     src/debug/texture_trace.cpp
-    src/debug/tick_audit.cpp
     src/hooks/frame_rate.cpp
     src/hooks/frame_rate_net.cpp
     src/hooks/mouse_look.cpp
     src/hooks/offline_challenges.cpp
     src/hooks/switch_tailcalls.cpp
+    src/hooks/tick_storage.cpp
     src/kernel/critical_section.cpp
     src/kernel/file_delete_on_close.cpp
     src/kernel/file_size_refresh.cpp

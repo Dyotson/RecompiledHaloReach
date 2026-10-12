@@ -257,7 +257,25 @@ bool Ticks30(uint32_t network, int games_before) {
   return network == 1 && (mode == 2 || (mode == 3 && games_before >= 1));
 }
 
-// Sets the game globals' copy of the options' tick rate (+0x1C) to 30 for such a game.
+// Every other game ticks at most kMaxTickRate times a second, at a whole number of frames per
+// tick: the display's rate divided by ceil(rate / 72), so 60 ticks at 60 fps, 60 at 120, 72 at
+// 144 (two frames per tick), 60 at 240. Many tick counters are bytes, a good part of them signed
+// and compared as such (unit actions, AI, players): 127 ticks are 4.2 s at the console's 30, 2.1 s
+// at 60, 1.76 s at 72 and 0.88 s at 144, where actions longer than that would break
+// (docs/framerate.md, "120 and 144 fps"). REACH_TICK_RATE_MAX=N changes the limit (0: none, the
+// game's own rule of one tick per frame).
+constexpr int kMaxTickRate = 72;
+
+int TickRateMax() {
+  static const int max = [] {
+    const char* v = std::getenv("REACH_TICK_RATE_MAX");
+    return v && *v ? std::max(0, std::atoi(v)) : kMaxTickRate;
+  }();
+  return max;
+}
+
+// Sets the game globals' copy of the options' tick rate (+0x1C) to 30 for such a game, and to at
+// most TickRateMax() for the others.
 void PatchGameTickRate(PPCContext& ctx, uint8_t* base, int games_before, const char* when) {
   const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
   const uint32_t globals_addr = LoadBE32(GuestPtr(base, tls + 0x3C));
@@ -265,10 +283,16 @@ void PatchGameTickRate(PPCContext& ctx, uint8_t* base, int games_before, const c
   uint8_t* globals = GuestPtr(base, globals_addr);
   const uint32_t network = LoadBE32(globals + 0x14);
   const int rate = int16_t(globals[0x1C] << 8 | globals[0x1D]);
-  if (rate == 30 || !Ticks30(network, games_before)) return;
-  REXLOG_INFO("frame_rate: {} (network type {}): 30 ticks a second instead of {}", when, network,
-              rate);
-  globals[0x1C] = 0, globals[0x1D] = 30;
+  int target = rate;
+  if (Ticks30(network, games_before)) {
+    target = 30;
+  } else if (TickRateMax() >= 30 && rate > TickRateMax()) {
+    target = rate / ((rate + TickRateMax() - 1) / TickRateMax());
+  }
+  if (target == rate || target <= 0) return;
+  REXLOG_INFO("frame_rate: {} (network type {}): {} ticks a second instead of {}", when, network,
+              target, rate);
+  globals[0x1C] = uint8_t(target >> 8), globals[0x1D] = uint8_t(target);
 }
 
 }  // namespace
