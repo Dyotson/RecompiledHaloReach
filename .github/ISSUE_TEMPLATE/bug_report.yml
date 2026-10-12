@@ -1,0 +1,70 @@
+name: Bug report
+description: "Something broke while building or playing Halo: Reach"
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Please don't attach or link game files, dumps or builds. Logs and screenshots are fine.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Building, Crash or hang, Graphics, Performance, Audio, Input or controller, Online, Saves, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Start the campaign\n2. ...\n3. ..."
+  - type: input
+    id: version
+    attributes:
+      label: Commit you built
+      description: Output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Fedora 44, Bazzite, Windows 11, ..."
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      placeholder: "RX 9060 XT, Mesa 26.1 (RADV)"
+    validations:
+      required: true
+  - type: input
+    id: settings
+    attributes:
+      label: Settings changed in reach.toml
+      placeholder: "frame_rate = 60, resolution_scale = 2, ..."
+  - type: input
+    id: server
+    attributes:
+      label: Online server (if online)
+      placeholder: "dyotserver.ddns.net:21100, your own, or none"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: "Drag the log file here (Linux: ~/.local/share/reach/reach.log). For a crash, the last 100 lines matter most."
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Checks
+      options:
+        - label: I play with my own copy of the game, and I did not attach any game files.
+          required: true
