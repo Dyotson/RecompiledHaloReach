@@ -1,10 +1,11 @@
-// reach - script timing that has to hold at frame_rate = 60 (docs/framerate.md).
+// reach - the tick rate above 30 fps, and the timing that has to hold at it (docs/framerate.md).
 //
 // Reach's tick rate is half the display's refresh rate: the game options get
 // round(refresh) / 2 (sub_82476A60, options + 0xC; 25 on a 50 Hz PAL set), and the game time
 // globals (TLS + 0x6C: +4 tick rate, +8 seconds per tick, +0xC game time in ticks) take it
 // from there. frame_rate = 60 runs the guest vblank at 120 Hz, so the game simulates 60
-// ticks a second. Durations are converted with the tick rate (game_seconds_to_ticks,
+// ticks a second; 120 and 144 run 240 and 288 Hz, and the tick rate is held at 72 or below
+// (60 at 120 fps, 72 at 144: two frames per tick; "The tick rate of games", below). Durations are converted with the tick rate (game_seconds_to_ticks,
 // sub_8214FAE8), so scripts written for 30 ticks keep their real-time lengths: `sleep 1`
 // is 1/30 s, which is 2 ticks at 60.
 //
@@ -233,7 +234,7 @@ extern "C" REX_FUNC(sub_8246E5A8) {
   }
 }
 
-// --- The tick rate of synchronous network games ------------------------------------------------
+// --- The tick rate of games ---------------------------------------------------------------------
 
 namespace {
 

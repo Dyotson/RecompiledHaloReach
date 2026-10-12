@@ -22,10 +22,9 @@ std::string ReachGpuBackend() { return REXCVAR_GET(gpu_backend); }
 // the frame rate follows the guest's vblank rate (docs/framerate.md).
 REXCVAR_DEFINE_INT32(frame_rate, 30, "Display",
                      "Frame rate: 30 (the console's), or 60 to 240 (60, 120, 144, ...). The "
-                     "guest vblank runs at twice the frame rate and the game ticks at half the "
-                     "refresh rate, so it simulates as many ticks a second as it draws frames; "
-                     "co-op over the network stays at 30 ticks (docs/framerate.md). Above 120 "
-                     "it needs SDK patch 0037")
+                     "guest vblank runs at twice the frame rate; the game simulates at most 72 "
+                     "ticks a second (60 at 120 fps, 72 at 144: two frames per tick), co-op over "
+                     "the network 30 (docs/framerate.md). Above 120 it needs SDK patch 0037")
     .validator([](std::string_view v) {
       int fps = 0;
       for (char c : v) {
@@ -79,9 +78,9 @@ void ApplyReachCvarDefaults() {
   // frame_rate above 30: the guest vblank at twice the frame rate (60 fps: 120 Hz, 144 fps:
   // 288 Hz). The game's frame limiter (2 vblanks), its render thread's schedule (a frame is
   // shown 4 vblanks after its update starts), its frame time (vblanks / refresh rate) and its
-  // tick rate (refresh rate / 2) all scale with it; the intro video keeps its speed. A
-  // video_mode_refresh_rate set in reach.toml or on the command line wins.
-  // src/hooks/frame_rate.cpp keeps cinematics and scripts working at these tick rates.
+  // tick rate (refresh rate / 2, at most 72: src/hooks/frame_rate.cpp) all scale with it; the
+  // intro video keeps its speed. A video_mode_refresh_rate set in reach.toml or on the command
+  // line wins. src/hooks/frame_rate.cpp keeps cinematics and scripts working at these rates.
   const int fps = REXCVAR_GET(frame_rate);
   if (fps > 30) {
     int hz = 2 * fps;

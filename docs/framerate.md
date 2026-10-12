@@ -164,8 +164,8 @@ and players with different frame rates play together ("Network games with differ
 rates", below).
 
 Beyond 60: `frame_rate` takes 30 or 60 to 240 (120 and 144 are the tested ones); the guest
-vblank runs at twice the frame rate, and the game ticks as often as it draws ("120 and 144
-fps", below). The SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`);
+vblank runs at twice the frame rate, and the game ticks at most 72 times a second, two frames
+per tick at 120 and 144 ("120 and 144 fps", below). The SDK clamps the reported refresh rate to 24-240 Hz (`xboxkrnl_video.cpp`);
 SDK patch 0037 raises that to 480 Hz, so 144 fps (a 288 Hz vblank) needs the patched
 runtime; without it the game logs a warning and runs at 120. The SDK's VSync thread checks
 for due vblanks every 1 ms, so each vblank comes up to 1 ms late (p50 33.6 ms rather than
@@ -541,23 +541,76 @@ game once the tolerances matched.
   pair (A hosts) with dumps and side-by-side shots; `xexdiff.py`, `objfield.py`,
   `gdbwatch.sh` (a solo game with a gdb write watchpoint on one guest word).
 
-## 120 and 144 fps (in progress, 2026-10-12)
+## 120 and 144 fps (2026-10-12, in progress)
 
-`frame_rate = 120` or `144` runs a 240 or 288 Hz guest vblank (288 needs SDK patch 0037), so
-the game draws and ticks 120 or 144 times a second, by its own rule (tick rate = refresh /
-2). Work state, for whoever continues (the design discussion and the results will replace
-this):
+**Now.** `frame_rate = 120` or `144` runs a 240 or 288 Hz guest vblank (288 needs SDK patch
+0037), so the game draws 120 or 144 frames a second. The simulation ticks at most 72 times a
+second, at a whole number of frames per tick: 60 ticks at 120 fps and 72 at 144, each tick
+shown for two frames (`src/hooks/frame_rate.cpp`, the display's rate divided by
+ceil(rate / 72); 60 fps keeps 60 ticks). Co-op over the network stays at 30 ticks.
+`REACH_TICK_RATE_MAX=0` gives the game's own rule back (one tick per frame, 144 at 144 fps),
+`=N` another limit.
 
-- Campaign opening at 144 (run folder `out/build/fr144`, runtime with 0037): 140-144 fps
-  through the intro and the cinematic, 1440 ticks per 10 s, one tick per frame; the opening
-  ends with its revert as at 60 (`game_reverted 4 tick(s) after the revert (tick rate 144)`:
-  `sleep 1` is 5 ticks there, the window round(144 / 30) = 5).
-- New: cinematic clip planes are moved to the tick of their 30 Hz frame (`sub_8246E5A8`,
-  `src/hooks/frame_rate.cpp`); the PERF `ontarget` uses 1000 / `frame_rate`.
-- `REACH_TICKAUDIT=1` (`src/debug/tick_audit.cpp`) logs each `game_seconds_to_ticks` call
-  site whose result passes 127, 255 or 32767 ticks: about 20 of its 427 call sites keep the
-  result in a byte (255 ticks: 8.5 s at 30, 1.77 s at 144) and ~150 in 16 bits (227 s at
-  144). The byte ones include the unit action timers (grenade throw and other animated
-  actions: the animation's length in ticks) and a 2 s hold of the predicted grenade count on
-  multiplayer clients (`sub_82394068`, 288 ticks: wraps to 32 at 144).
+### The design: 72 ticks, not 144, and no interpolation
 
+Three ways to get 144 frames a second:
+
+1. **144 ticks a second**, the game's own rule (tick rate = refresh / 2). The engine is built
+   for a variable tick rate: 427 calls convert seconds with `game_seconds_to_ticks`, 260
+   functions read the tick rate and 312 the seconds per tick, and the 30 Hz assumptions found so
+   far are fixed for any rate (cinematic camera frames, the revert window, Havok's tolerances,
+   cinematic clip planes). It runs: the campaign opening at 144 plays at 140-144 fps with one
+   tick per frame, both cinematics end with their revert (`game_reverted 4 tick(s) after the
+   revert (tick rate 144)`), the Falcon flight's camera and objects move together on every
+   tick (a CINEREC recording of 1500 ticks: no tick where they differ by more than 5 cm, apart
+   from the 2 cuts), and gameplay, a revert to the last save from the pause menu and firing all
+   work. **But many tick counters are a byte**, a good part of them signed: the unit action
+   timers (`unit + *(short *)(unit + 0x1B6)`: +8 ticks elapsed, +9 the event tick, +0xA the
+   length, compared as signed chars by the action updates such as `sub_823FCA28`, the grenade
+   throw), the player's action lock (`players + 0x88`, clamped to 127), AI and unit timers that
+   count a signed byte up and compare `ticks * seconds per tick` with a duration
+   (`sub_823BDB98`, `sub_823BDE60`, `sub_823BE420`, `sub_82418610`), and 20 calls that store
+   `game_seconds_to_ticks` in a byte without a clamp (the animation lengths of unit actions,
+   the 2 s hold of a multiplayer client's predicted grenade count, `sub_82394068`, which is 288
+   ticks at 144 and wraps to 32). A signed byte holds 127 ticks: 4.2 s on the console, 2.1 s at
+   60, 1.76 s at 72, 0.88 s at 144. A static scan finds 21 more functions with byte tick
+   counters next to the tick rate; a complete audit of the engine's byte fields is not
+   feasible, so 144 ticks would leave actions longer than 0.88 s broken in ways nobody has
+   listed.
+2. **30 or 60 ticks and an interpolating renderer** (what MCC's PC Reach does). The Xbox 360
+   build has nothing to build on: nothing reads the game time's leftover tick fraction
+   (+0x14), and the per-frame updates after the ticks (`sub_82440410`: player control and the
+   camera's look, effects, `sub_82208CC8` and six `*(dt)` calls) only cover the view, effects
+   and the HUD. MCC's interpolation is a subsystem of its own (`halo_interpolation` thread-local
+   block, 110 MB and 2 × 27 MB of buffers, about 30 functions plus hooks in the objects'
+   node matrices, cameras, effects and first person, "CS:Interpolator Pending New/Deleted
+   Objects" locks for objects created and deleted between ticks). Porting it through hooks in
+   a static recompilation is a renderer project of its own, with its own failure modes
+   (teleports, attachments, first person).
+3. **Fewer ticks than frames, an even number of frames per tick.** What co-op already does on
+   60 fps machines (30 ticks, two frames each), with every system at a rate it handles: the
+   camera's look, aiming, effects, particles and the HUD update every frame (144 times a
+   second), objects and the camera's position every tick (72). At 120 fps this is exactly the
+   tested 60 tick simulation. At 144 the byte limits are 1.76 s (signed) and 3.5 s
+   (unsigned), close to the 2.1 s and 4.25 s that 60 fps has been played with.
+
+The third is the robust one: the simulation stays within the margins that 60 fps has been
+tested at, the frame rate is the full 144, and nothing new runs per tick. Its cost is that
+moving objects advance on every other frame at 144 (72 Hz motion, even cadence), not 144. An
+uneven 60 ticks at 144 fps (2 or 3 frames per tick) was not chosen for that reason.
+
+### Fixes for rates above 60 (any tick rate)
+
+- **Cinematic clip planes** (`sub_8246E5A8`, `cinematic_clips_initialize_for_shot`): a shot's
+  clip planes are on from a start to an end frame, 30 Hz shot frames that the game added to
+  the game time in ticks, so above 30 ticks a second a plane went on and off too early (half
+  way at 60). The copies are moved to round(frame × tick rate / 30). Logged as `frame_rate:
+  cinematic clip plane ...`; none of Winter Contingency's two opening cinematics has one.
+- **Byte and 16-bit tick fields** (`src/hooks/tick_storage.cpp`): above 30 ticks a second,
+  `game_seconds_to_ticks` results stored unclamped in a byte (20 call sites) or in 16 bits (149)
+  saturate at 255 / 32767 instead of wrapping (logged once per site as `tick_storage: ...`).
+  At 72 ticks only durations over 3.5 s reach that.
+- `REACH_TICKAUDIT=1` logs each call site whose result passes 127, 255 and 32767 ticks
+  (`TICKAUDIT: call ...`). In the campaign opening, the flight and a few minutes of play at 144
+  ticks no byte site passed 127; 16-bit sites got up to 3258 ticks.
+- The PERF `ontarget` uses 1000 / `frame_rate`.
