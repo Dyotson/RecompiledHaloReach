@@ -475,13 +475,17 @@ Countdown).** 60 fps (Alpha) and 30 fps (Jun) searched, found each other in abou
 the 1-minute game (both in the same game, clocks equal, scoreboard shown), and searched again,
 no error. The 30 fps side saw the session first (1 session, the 60 fps one 0, then both).
 
+**Mixed campaign co-op (2026-10-12, System Link, Noble Actual on Normal, 60 fps host, 30 fps
+client).** The cutscene played in step on both (identical frames), then both landed and played
+about 6 min of the mission walking, turning and shooting: no error. Positions read in both
+processes agreed (median 0, max 7 cm). No checkpoint revert was triggered (nothing killed
+the players), and co-op through Reach Live and 30 host / 60 client were not run.
+
 **Not checked yet** (next steps for mixed play):
-- Campaign co-op at mixed rates (only Firefight was run), and co-op through Reach Live
-  instead of System Link (same game code, other transport).
-- Matchmaking at mixed rates since the gate came off (the search keys are equal again; before
-  the gate a 60/30 pair was matched within 40 s and played a whole game).
-- Mixed multiplayer beyond the short test: grenades and other projectiles at range, vehicles,
-  more than two players ("Mixed multiplayer", above).
+- Campaign co-op: a checkpoint revert at mixed rates, 30 host / 60 client, and co-op through
+  Reach Live instead of System Link (same game code, other transport).
+- Matchmaking with the 30 fps player first in the pair's host role (one direction was run).
+- Mixed multiplayer: grenades at range hitting, vehicles, more than two players ("Mixed multiplayer", above).
 - How co-op looks on a 60 fps machine at 30 ticks (objects step at 30 Hz, the camera every
   frame): a reason to try interpolation (option (b)).
 - What re-creates the Havok world every 5-10 s (`sub_8251E738` ← `sub_8251C8B0` ←
