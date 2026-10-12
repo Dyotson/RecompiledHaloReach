@@ -299,8 +299,9 @@ class ReachLive(asyncio.DatagramProtocol):
 
     # --- Matchmaking sessions (docs/online_plan.md section 5.4) ----------------------
     # A player hosting a matchmaking session publishes it with a search key (the
-    # playlist; clients put their tick rate in the top byte when it is not 30, so players
-    # with different frame_rate settings are never matched, docs/framerate.md); players
+    # playlist; clients whose co-op runs at 60 ticks a second (REACH_SYNC_TICKS30=0) put
+    # their tick rate in the top byte, so they are only matched with each other,
+    # docs/framerate.md); players
     # searching with that key get the room's matching sessions. The
     # session record is the client's (XSESSION_INFO, slots, properties, QoS data) and
     # opaque here. Every searching group also hosts a session, and two groups that find

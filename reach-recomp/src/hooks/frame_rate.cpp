@@ -35,10 +35,29 @@
 // fraction the truncation dropped; at 30 ticks a second the fraction is 0 and the game's own
 // frame is used. REACH_CINEMATIC_CAMERA_STEPS=1 turns this off (for comparisons).
 //
-// Each machine takes the tick rate from its own display, also in network games, so network
-// co-op (campaign and Firefight are synchronous games: every machine runs the same
-// simulation) needs the same frame_rate on every machine; frame_rate_net.cpp keeps machines
-// with different ones apart (docs/framerate.md).
+// Synchronous network games (campaign and Firefight co-op over System Link or Reach Live: every
+// machine runs the same simulation, tick for tick) run at 30 ticks a second on every machine,
+// whatever its frame rate: a 60 fps machine still presents 60 frames a second, one tick every
+// other frame, so players at 30 and 60 fps can play co-op together. The game globals' copy of
+// the game options' tick rate (+0x1C, round(refresh) / 2) is set to 30 right after the options
+// are copied in at game start (sub_82476568) and again before the game time takes it
+// (sub_8247B530). REACH_SYNC_TICKS30=0 keeps the display's rate in co-op (60/60 co-op at 60
+// ticks; frame_rate_net.cpp then keeps machines with other frame rates out, as before);
+// =2 also runs local games at 30 ticks, =3 local games after the main menu (tests).
+//
+// Havok's collision tolerances (hkpCollisionDispatcher::initCollisionQualityInfo,
+// sub_8284FD70): the Havok world is created with hkpWorldCinfo::m_expectedMinPsiDeltaTime = the
+// game time's seconds per tick (sub_8251C3A0), and the dispatcher derives its TOI separations
+// from it (gravity * dt^2). After each world creation sub_8251D3F8 copies the dispatcher's first
+// 7760 bytes: the first time into a static copy (0x82AD2AC4), every later time back from it.
+// So the tolerances of the session's first world, the main menu's, hold for every later game:
+// on a 60 fps machine the menu runs 60 ticks a second, so a co-op game at 30 ticks still ran
+// its collisions with 1/60 s tolerances. The props that drop at the start of a Firefight map
+// came to rest differently from a 30 fps machine's within 10 ticks, the AI followed, and the
+// game failed with "An error occurred while playing co-op" (docs/framerate.md, "Mixed co-op").
+// Here the quality infos are always computed for 1/30 s, the console's tick, whatever the
+// tick rate; at 30 ticks a second nothing changes. REACH_HAVOK_NATIVE_STEP=1 lets the game pass
+// its own value (for comparisons).
 
 #include "../platform/guest_memory.h"
 
@@ -58,6 +77,9 @@ using reach::GuestPtr;
 
 REX_EXTERN(__imp__sub_825CD9C0);  // hs game_reverted
 REX_EXTERN(__imp__sub_8249FEB0);  // scripted camera, mode 5: matrix of a shot camera frame
+REX_EXTERN(__imp__sub_82476568);  // game start: copies the game options into the game globals (+0x10)
+REX_EXTERN(__imp__sub_8247B530);  // game time init: tick rate from the game globals (+0x1C)
+REX_EXTERN(__imp__sub_8284FD70);  // hkpCollisionDispatcher::initCollisionQualityInfo(this, input)
 
 namespace {
 
@@ -174,4 +196,87 @@ extern "C" REX_FUNC(sub_8249FEB0) {
   for (int i = 0; i < 9; ++i) StoreBEFloat(GuestPtr(base, scratch + 4 * i), out[i]);
   ctx.r3.u64 = scratch;
   __imp__sub_8249FEB0(ctx, base);
+}
+
+// --- The tick rate of synchronous network games ------------------------------------------------
+
+namespace {
+
+int games_started = 0;  // game time initializations (sub_8247B530); main thread only
+
+// REACH_SYNC_TICKS30: unset or 1 synchronous network games at 30 ticks a second (the default),
+// 0 at the display's rate, 2 also every local game, 3 local games after the main menu.
+int SyncTicks30() {
+  static const int mode = [] {
+    const char* v = std::getenv("REACH_SYNC_TICKS30");
+    return v && *v ? std::atoi(v) : 1;
+  }();
+  return mode;
+}
+
+// Whether the game about to start (game globals +0x14: network type, 1 local, 2 sync-client,
+// 3 sync-server) runs at 30 ticks a second; `games_before`: games started before it.
+bool Ticks30(uint32_t network, int games_before) {
+  const int mode = SyncTicks30();
+  if (network == 2 || network == 3) return mode != 0;
+  return network == 1 && (mode == 2 || (mode == 3 && games_before >= 1));
+}
+
+// Sets the game globals' copy of the options' tick rate (+0x1C) to 30 for such a game.
+void PatchGameTickRate(PPCContext& ctx, uint8_t* base, int games_before, const char* when) {
+  const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+  const uint32_t globals_addr = LoadBE32(GuestPtr(base, tls + 0x3C));
+  if (!globals_addr) return;
+  uint8_t* globals = GuestPtr(base, globals_addr);
+  const uint32_t network = LoadBE32(globals + 0x14);
+  const int rate = int16_t(globals[0x1C] << 8 | globals[0x1D]);
+  if (rate == 30 || !Ticks30(network, games_before)) return;
+  REXLOG_INFO("frame_rate: {} (network type {}): 30 ticks a second instead of {}", when, network,
+              rate);
+  globals[0x1C] = 0, globals[0x1D] = 30;
+}
+
+}  // namespace
+
+namespace reach {
+int GamesStarted() { return games_started; }
+bool SyncGamesAt30() { return SyncTicks30() != 0; }
+}  // namespace reach
+
+// Right after the game options are copied into the game globals at game start, before the
+// systems' new-map initialization (sub_82475D48) reads them.
+extern "C" REX_FUNC(sub_82476568) {
+  __imp__sub_82476568(ctx, base);
+  PatchGameTickRate(ctx, base, games_started, "game start");
+}
+
+extern "C" REX_FUNC(sub_8247B530) {
+  const int games_before = games_started++;
+  PatchGameTickRate(ctx, base, games_before, "game time");
+  __imp__sub_8247B530(ctx, base);
+}
+
+// sub_8284FD70(dispatcher, input): input +0 gravity length, +4 collision tolerance, +8 the
+// minimum expected step (s), +0xC the maximum linear velocity.
+extern "C" REX_FUNC(sub_8284FD70) {
+  static const bool native = [] {
+    const char* v = std::getenv("REACH_HAVOK_NATIVE_STEP");
+    return v && *v && *v != '0';
+  }();
+  constexpr uint32_t kThirtieth = 0x3D088889;  // 1.0f / 30, as the game time computes it
+  uint8_t* input = GuestPtr(base, ctx.r4.u32);
+  const uint32_t asked = LoadBE32(input + 8);
+  // The world is created again every few seconds (5 s in the campaign, 10 s in Firefight):
+  // log only when the requested step changes.
+  static uint32_t last_asked = 0;  // main thread only
+  if (asked != last_asked) {
+    last_asked = asked;
+    REXLOG_INFO("frame_rate: Havok collision tolerances (dispatcher {:#x}) for steps of {} s{}",
+                ctx.r3.u32, LoadBEFloat(input + 8),
+                native || asked == kThirtieth ? "" : ", computed for 1/30 s");
+  }
+  if (native || asked == kThirtieth) return __imp__sub_8284FD70(ctx, base);
+  StoreBE32(input + 8, kThirtieth);
+  __imp__sub_8284FD70(ctx, base);
+  StoreBE32(input + 8, asked);
 }

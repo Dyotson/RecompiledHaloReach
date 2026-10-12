@@ -1,7 +1,7 @@
 // reach - tools for synchronous network games (campaign and Firefight co-op), where every
 // machine runs the same simulation tick for tick: game state dumps to compare two machines,
-// and experiments with the tick and frame rate (docs/framerate.md, "60/30 co-op: what
-// diverges"). Everything is off unless its environment variable is set.
+// and experiments with the tick and frame rate (docs/framerate.md, "Mixed co-op"). Everything
+// is off unless its environment variable is set.
 //
 // REACH_GSDUMP=DIR and REACH_GSDUMP_TICKS=T1,T2,...: in synchronous network games (and local
 // ones after the main menu with REACH_GSDUMP_LOCAL=1), right after the tick that brings the
@@ -10,7 +10,8 @@
 // globals block (*r13, 0x800 bytes of pointers into it) to DIR/tls_Ti.bin. Run both
 // machines with the same ticks and compare the files with tools/gsdiff.py.
 //
-// REACH_FRAMEDIFF, REACH_SYNC_TICKS30, REACH_SYNC_FPS30 and the reach_in_tick symbol: below.
+// REACH_FRAMEDIFF, REACH_SYNC_FPS30, REACH_HKTRACE and the reach_in_tick symbol: below.
+// REACH_SYNC_TICKS30 (the tick rate of synchronous and local games) is in hooks/frame_rate.cpp.
 //
 // REACH_CINEREC=FILE: whenever FILE.trigger appears (it is deleted again), the next
 // REACH_CINEREC_FRAMES (default 600) main-game frame updates (sub_82440410) each append a record
@@ -45,10 +46,8 @@
 using reach::GuestPtr;
 
 REX_EXTERN(__imp__sub_821224D8);  // one game tick
-REX_EXTERN(__imp__sub_8247B530);  // game time init: tick rate from the game globals (+0x1C)
 REX_EXTERN(__imp__sub_82440410);  // the main game's per-frame update (runs the frame's ticks)
 REX_EXTERN(__imp__sub_820E1D18);  // Main_FrameLoopStep: waits for the frame's vblanks, runs a frame
-REX_EXTERN(__imp__sub_82476568);  // game start: copies the game options into the game globals (+0x10)
 
 namespace {
 
@@ -98,7 +97,6 @@ bool Write(const std::string& path, const uint8_t* data, size_t size) {
 
 namespace {
 int ticks_this_frame = 0;  // main thread only
-int games_started = 0;     // game time initializations (sub_8247B530): the main menu is the first
 }  // namespace
 
 // 1 while the main thread runs a game tick: a debugger can tell writes from inside a tick from
@@ -127,11 +125,19 @@ extern "C" REX_FUNC(sub_821224D8) {
     return v && *v && *v != '0';
   }();
   // REACH_GSDUMP_LOCAL=1: also local games after the main menu (the first game).
-  if (network != 2 && network != 3 && !(local && network == 1 && games_started >= 2)) return;
+  if (network != 2 && network != 3 && !(local && network == 1 && reach::GamesStarted() >= 2)) return;
   const uint32_t state = LoadBE32(GuestPtr(base, kLiveStatePtr));
   const std::string suffix = std::to_string(now) + ".bin";
   const bool ok = state && Write(config.dir + "/gs_" + suffix, GuestPtr(base, state), kStateSize) &&
                   Write(config.dir + "/tls_" + suffix, GuestPtr(base, tls), kTlsSize);
+  // REACH_GSDUMP_XEX=1: also the executable's writable data (.data to BINKDATA, 0x82A00000 up
+  // to 0x839E0000) as DIR/xex_Ti.bin, to find state outside the game state that differs
+  // between two machines.
+  static const bool xex = [] {
+    const char* v = std::getenv("REACH_GSDUMP_XEX");
+    return v && *v && *v != '0';
+  }();
+  if (xex) Write(config.dir + "/xex_" + suffix, GuestPtr(base, 0x82A00000u), 0xFE0000);
   const uint8_t* gt = GuestPtr(base, game_time);
   REXLOG_INFO("GSDUMP tick {} (network type {}, {} ticks/s) state {:#x} tls {:#x}: {}", now, network,
               int16_t(gt[4] << 8 | gt[5]), state, tls, ok ? "written" : "FAILED");
@@ -293,7 +299,7 @@ extern "C" REX_FUNC(sub_82440410) {
   static std::set<uint32_t> done;  // each tick once
   if (done.count(now)) return;
   // Only from the second game on (the first is the main menu).
-  if (games_started < 2) return;
+  if (reach::GamesStarted() < 2) return;
   if (pending == now && ticks_this_frame == 0) {
     Write(prefix + "_b.bin", GuestPtr(base, state), kStateSize);
     REXLOG_INFO("FRAMEDIFF tick {}: after a frame without a tick", now);
@@ -311,38 +317,14 @@ extern "C" REX_FUNC(sub_82440410) {
   }
 }
 
-// Experiment (docs/framerate.md, "60/30 co-op"): REACH_SYNC_TICKS30=1 runs synchronous games
-// (network type 2 sync-client, 3 sync-server: game globals +0x14) at 30 ticks a second
-// whatever the frame rate; REACH_SYNC_TICKS30=2 also local games (type 1). The game time
-// globals take the tick rate from the game globals (+0x1C, a copy of the game options' tick
-// rate) when a game starts; sub_82476568 below patches that copy as soon as it is made.
-extern "C" REX_FUNC(sub_8247B530) {
-  ++games_started;
-  static const int force = [] {
-    const char* v = std::getenv("REACH_SYNC_TICKS30");
-    return v && *v ? std::atoi(v) : 0;
-  }();
-  if (force) {
-    const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
-    uint8_t* globals = GuestPtr(base, LoadBE32(GuestPtr(base, tls + 0x3C)));
-    const uint32_t network = LoadBE32(globals + 0x14);
-    const int rate = int16_t(globals[0x1C] << 8 | globals[0x1D]);
-    if ((network == 2 || network == 3 || (force == 2 && network == 1)) && rate != 30) {
-      REXLOG_INFO("frame_rate: synchronous game (network type {}): 30 ticks a second instead of {}",
-                  network, rate);
-      globals[0x1C] = 0, globals[0x1D] = 30;
-    }
-  }
-  __imp__sub_8247B530(ctx, base);
-}
-
 // Experiment: REACH_SYNC_FPS30=1 lets synchronous games (network type 2 or 3) run at most one
 // frame every 4 guest vblanks: 30 fps at frame_rate = 60 (120 Hz vblank), so with
-// REACH_SYNC_TICKS30 every frame runs exactly one tick, as on a 30 fps machine.
+// REACH_SYNC_TICKS30 every frame runs exactly one tick, as on a 30 fps machine. =2 also local
+// games (type 1, the main menu included).
 extern "C" REX_FUNC(sub_820E1D18) {
-  static const bool on = [] {
+  static const int on = [] {
     const char* v = std::getenv("REACH_SYNC_FPS30");
-    return v && *v && *v != '0';
+    return v && *v ? std::atoi(v) : 0;
   }();
   if (on) {
     static uint64_t last = 0;
@@ -357,7 +339,7 @@ extern "C" REX_FUNC(sub_820E1D18) {
     uint64_t now = vblank();
     // One frame per 30 Hz tick: 4 vblanks at 120 Hz, 2 (the game's own pace) at 60 Hz.
     const uint64_t frame = uint64_t(reach::TickRate()) * 2 / 30;
-    if ((network == 2 || network == 3) && frame > 2) {
+    if ((network == 2 || network == 3 || (on == 2 && network == 1)) && frame > 2) {
       while (now < last + frame) {
         std::this_thread::sleep_for(std::chrono::microseconds(300));
         now = vblank();
@@ -368,18 +350,52 @@ extern "C" REX_FUNC(sub_820E1D18) {
   __imp__sub_820E1D18(ctx, base);
 }
 
-// With REACH_SYNC_TICKS30, also right after the game options are copied into the game globals
-// at game start (sub_82476568), before anything else reads the tick rate there.
-extern "C" REX_FUNC(sub_82476568) {
-  __imp__sub_82476568(ctx, base);
-  const char* v = std::getenv("REACH_SYNC_TICKS30");
-  if (!v || !*v || *v == '0') return;
-  const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
-  uint8_t* globals = GuestPtr(base, LoadBE32(GuestPtr(base, tls + 0x3C)));
-  const uint32_t network = LoadBE32(globals + 0x14);
-  const int rate = int16_t(globals[0x1C] << 8 | globals[0x1D]);
-  if ((network == 2 || network == 3) && rate != 30) {
-    REXLOG_INFO("frame_rate: game start, synchronous game: options tick rate {} -> 30", rate);
-    globals[0x1C] = 0, globals[0x1D] = 30;
+// REACH_HKTRACE=N: the first N Havok integration steps of each game (hkpSimulation::integrate,
+// sub_82892BB8(simulation, dt): the step runs from the simulation's PSI time (+0x18) to PSI time
+// + dt, and stores dt at +0x1C) are logged with their inputs as raw bits, to compare the physics
+// steps of two machines.
+REX_EXTERN(__imp__sub_82892BB8);
+
+extern "C" REX_FUNC(sub_82892BB8) {
+  static const int limit = [] {
+    const char* v = std::getenv("REACH_HKTRACE");
+    return v && *v ? std::atoi(v) : 0;
+  }();
+  if (limit <= 0) return __imp__sub_82892BB8(ctx, base);
+  static int game = -1, logged = 0;
+  if (game != reach::GamesStarted()) game = reach::GamesStarted(), logged = 0;
+  const bool log = logged < limit;
+  const uint32_t sim = ctx.r3.u32;
+  const float dt = float(ctx.f1.f64);
+  uint32_t dt_bits;
+  std::memcpy(&dt_bits, &dt, 4);
+  const uint32_t current = LoadBE32(GuestPtr(base, sim + 0x14));
+  const uint32_t psi = LoadBE32(GuestPtr(base, sim + 0x18));
+  __imp__sub_82892BB8(ctx, base);
+  if (!log) return;
+  ++logged;
+  const uint32_t tls = ctx.r13.u32 ? LoadBE32(GuestPtr(base, ctx.r13.u32)) : 0;
+  const uint32_t game_time = tls ? LoadBE32(GuestPtr(base, tls + 0x6C)) : 0;
+  REXLOG_INFO("HKTRACE game {} time {} sim {:#x} dt {:08x} current {:08x} psi {:08x} -> psi {:08x}", game,
+              game_time ? LoadBE32(GuestPtr(base, game_time + 0xC)) : 0, sim, dt_bits, current, psi,
+              LoadBE32(GuestPtr(base, sim + 0x18)));
+}
+
+// With REACH_HKTRACE: the Havok world's creation (sub_8251C3A0, at each map load) and the
+// game time's seconds per tick it reads for hkpWorldCinfo::m_expectedMinPsiDeltaTime.
+REX_EXTERN(__imp__sub_8251C3A0);
+
+extern "C" REX_FUNC(sub_8251C3A0) {
+  static const bool on = [] {
+    const char* v = std::getenv("REACH_HKTRACE");
+    return v && *v && *v != '0';
+  }();
+  if (on) {
+    const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+    const uint32_t game_time = LoadBE32(GuestPtr(base, tls + 0x6C));
+    const uint8_t* gt = GuestPtr(base, game_time);
+    REXLOG_INFO("HKTRACE world created (games started {}): game time rate {} seconds per tick {:08x}",
+                reach::GamesStarted(), int16_t(gt[4] << 8 | gt[5]), LoadBE32(gt + 8));
   }
+  __imp__sub_8251C3A0(ctx, base);
 }

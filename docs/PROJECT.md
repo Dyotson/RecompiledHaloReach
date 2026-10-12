@@ -400,6 +400,20 @@ Check exact param names in `endpoints.json` before calling.
   props dropping at the start of the map, then in the AI, until "An error occurred while
   playing co-op"; a 30/30 control stays identical. Something besides the game's tick rate
   reads the 120 Hz display rate, most likely the physics. Details: `docs/framerate.md`.
+- 2026-10-12: **Players at 30 and 60 fps play together, co-op included.** The co-op
+  divergence was Havok's collision tolerances: the game computes them from the tick rate of
+  the session's first Havok world (the main menu's, 60 ticks a second at 60 fps) and copies
+  them back after every later world creation (`sub_8251D3F8`), so a co-op game forced to 30
+  ticks still collided with 1/60 s TOI thresholds and its falling props drifted from tick 8.
+  `src/hooks/frame_rate.cpp` now computes them for 1/30 s always (`sub_8284FD70`) and runs
+  network co-op at 30 ticks a second on every machine (60 fps machines still present 60
+  frames a second). A local reproduction (solo Firefight, `REACH_SYNC_TICKS30=3`) matches a
+  30 fps run in every object; 60/30 and 30/60 System Link Firefight ran 140 s and 7 min
+  without the co-op error, 60/60 and 30/30 co-op and the campaign at 60 fps still work. The
+  frame rate gate in `frame_rate_net.cpp` is off unless `REACH_SYNC_TICKS30=0` (co-op at the
+  display's rate).
+  New debug switches: `REACH_HKTRACE`, `REACH_GSDUMP_XEX`, `REACH_HAVOK_NATIVE_STEP`.
+  Details: `docs/framerate.md`.
 - 2026-10-11: **Carter's and Kat's faces render (SDK patches 0034, 0035).** Their faces in
   cinematics are indexed triangle strips with discrete tessellation, which the SDK (and
   Xenia) dropped ("Unsupported tessellation mode 0 for primitive type 6"). 0035 draws

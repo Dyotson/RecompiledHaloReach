@@ -504,8 +504,9 @@ uint32_t XInviteGetAcceptedInfo(uint8_t* base, uint32_t args) {
 // public, max private, filled public, filled private: u8 each), our user properties
 // (u8 count, then id u32, type u8, value 8 bytes) and contexts (u8 count, then id u32,
 // value u32), the QoS data (u16 length + bytes). The server matches sessions by search key:
-// the playlist, with our tick rate in the top byte when it is not 30 (reach::MatchmakingKey),
-// so players with different frame rates are not matched (docs/framerate.md).
+// the playlist (reach::MatchmakingKey; with REACH_SYNC_TICKS30=0 also our tick rate in the top
+// byte when it is not 30, so players whose co-op runs at other rates are not matched,
+// docs/framerate.md).
 
 constexpr uint32_t kSessionUsesMatchmaking = 0x8;
 constexpr uint32_t kPropertyHopper = 0x10000015;

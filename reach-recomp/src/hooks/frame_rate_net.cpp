@@ -1,10 +1,14 @@
-// reach - keeps players with different frame rates out of each other's network games
-// (docs/framerate.md, "Network games").
+// reach - keeps players whose games cannot run together out of each other's network games
+// (docs/framerate.md, "Network games with different frame rates").
 //
 // Each machine takes its tick rate from its own display (round(refresh) / 2, so 60 ticks a
-// second with frame_rate = 60), also in network games. Campaign and Firefight co-op run the
-// same simulation on every machine and fail with "An error occurred while playing co-op"
-// when a 60 and a 30 tick machine play together; mixed multiplayer games are not checked.
+// second with frame_rate = 60). Multiplayer games (distributed: each machine simulates its own
+// players) run fine with each machine at its own rate. Campaign and Firefight co-op run the
+// same simulation on every machine and fail with "An error occurred while playing co-op" unless
+// every machine runs the same tick rate; frame_rate.cpp runs them at 30 ticks a second on every
+// machine, so by default nothing here applies and players at 30 and 60 fps play together in
+// every mode. With REACH_SYNC_TICKS30=0 a 60 fps machine runs co-op at 60 ticks a second, and
+// then only plays with machines at its own frame rate, through the check below.
 //
 // The game already keeps different builds apart with a version number (0x82BD2660, the build
 // number 11860) that travels in two places:
@@ -18,16 +22,18 @@
 //     (sub_826EA6C8(executable type, version, compatible version), from the System Link
 //     list and the roster: X "Join User" does nothing otherwise), and the roster rates such a
 //     session as not joinable (sub_822CABB8, status 4).
-// Here the network copies of the version carry the tick rate: a machine that does not run
-// 30 ticks a second sends 11860 + (tick rate << 8) instead of 11860 (16 bits on the wire),
-// and the two checks compare what arrives with what this machine would send. Equal
-// versions are restored to 11860 for the game's comparison; a peer at another tick rate
-// gets a version the game refuses. 30 tick machines send the plain build number, so they
-// still play with builds from before this change. Saved content (films, maps, game types)
+// Here the network copies of the version carry the co-op tick rate: a machine whose co-op
+// does not run at 30 ticks a second sends 11860 + (tick rate << 8) instead of 11860 (16 bits
+// on the wire), and the two checks compare what arrives with what this machine would send.
+// Equal versions are restored to 11860 for the game's comparison; a peer at another rate gets
+// a version the game refuses. Machines with co-op at 30 ticks send the plain build number, so
+// they play with each other whatever their frame rates, and with 30 fps builds from before
+// this check. Builds from before co-op at 30 ticks that run at 60 fps send 0x6A54 and stay
+// apart from these (their co-op runs at 60 ticks). Saved content (films, maps, game types)
 // keeps the plain number: only these four functions see the tagged one.
 //
-// REACH_MIXED_FRAME_RATE=1 turns this off (and the matchmaking key in live_xmsg.cpp), to
-// test mixed games.
+// REACH_MIXED_FRAME_RATE=1 turns the check off (and the matchmaking key in live_xmsg.cpp)
+// also with REACH_SYNC_TICKS30=0, to test mixed games.
 
 #include "frame_rate.h"
 
@@ -78,8 +84,9 @@ bool MixedAllowed() {
   return allowed;
 }
 
-// The tick rate network peers have to share: ours, or 30 when mixed games are allowed.
-int NetTickRate() { return MixedAllowed() ? 30 : reach::TickRate(); }
+// The tick rate network peers have to share: 30 (the plain build number) when co-op runs at
+// 30 ticks a second or mixed games are allowed, else ours.
+int NetTickRate() { return MixedAllowed() || reach::SyncGamesAt30() ? 30 : reach::TickRate(); }
 
 // What this machine sends for the version `v`, and what the checks make of a received one.
 uint32_t Tagged(uint32_t v) {

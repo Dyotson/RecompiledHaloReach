@@ -62,7 +62,7 @@ the game (see [Legal](#legal)).
 | Forge | Works locally: editing on Sword Base, object placement, saving map variants. Two players through Reach Live (one joins the other's Forge lobby from the roster): both play and switch to edit mode, a placed object shows in the other's budget, and the host saves a map variant. Checked once on Sword Base, two instances on one machine; moving and deleting objects and the System Link browser route were not tried |
 | Online | Over the internet through a self-hosted **Reach Live** server: an emulated Xbox LIVE (friends roster, presence, joining a friend, invites) and System Link (the game's browser lists everyone's games). Tested with up to three players on one machine: Firefight and Slayer through the postgame, host migration. Direct peer-to-peer with NAT hole punching, relayed by the server when that fails ([`docs/online_plan.md`](docs/online_plan.md) section 5). Matchmaking: START MATCHMAKING on a server finds other players on the server's playlists (Free For All, Team Slayer, Capture the Flag, Objective), merges the groups, loads the map and plays, then searches again; the Playlist screen shows player counts and images, and cR/rank progression comes from matchmade games. Tested with two players on one machine; more than two, Arena and the Xbox LIVE party are not available ([`docs/online_plan.md`](docs/online_plan.md) section 5.4) |
 | File share | Through Reach Live: upload maps and game types from the game's File Share UI, browse a friend's share from the roster and download into Local Files ([`docs/online_plan.md`](docs/online_plan.md) section 5.3) |
-| 60 fps | `frame_rate = 60` runs the simulation at 60 ticks a second instead of 30. Checked in the campaign, Firefight, matchmaking and System Link; online, players need the same setting (different ones are kept apart, and mixed co-op fails) ([`docs/framerate.md`](docs/framerate.md)) |
+| 60 fps | `frame_rate = 60` runs the simulation at 60 ticks a second instead of 30. Checked in the campaign, Firefight, matchmaking and System Link; online, 30 and 60 fps players play together (network co-op runs at 30 ticks a second on every machine) ([`docs/framerate.md`](docs/framerate.md)) |
 | GPU emulation speed | SDK patches 0028-0032 cut the cost of the emulated GPU's command processor, memory watches and texture bindings. Measured in Forza Horizon (same SDK): a race went from 41 to 60 fps; Reach runs the same code (see [`docs/perf.md`](docs/perf.md)) |
 | Higher resolution | `resolution_scale = 2` in `reach.toml` (or `--resolution_scale=2`) renders at 2304×1440 instead of 1152×720; menus and Firefight checked, no artifacts seen. Frame rate on a dedicated GPU still to be measured |
 | Keyboard and mouse | On by default next to pads: Halo-style bindings (rebindable `kbm_bind_*` cvars) and raw mouse look fed straight into player control, no stick emulation ([`docs/input.md`](docs/input.md)) |
@@ -148,11 +148,9 @@ tools/play.sh --resolution_scale=2   # render at 2304x1440 instead of 1152x720
 - **Frame rate:** `frame_rate = 60` in `reach.toml` runs the game at 60 fps instead of the
   console's 30. The game ticks at half the display rate, so it then also simulates 60 ticks
   a second (game time stays real time). Checked in the campaign, Firefight, matchmaking and
-  System Link ([`docs/framerate.md`](docs/framerate.md)). Online, every player needs the same
-  `frame_rate`: players with different settings can't join each other's games (System Link
-  lists the game but Join does nothing, matchmaking never matches them, and the log says
-  `frame_rate: a session at 60 ticks a second is not joinable`). Mixed co-op fails with "An
-  error occurred while playing co-op".
+  System Link ([`docs/framerate.md`](docs/framerate.md)). Online, players at 30 and 60 fps
+  play together: co-op (campaign and Firefight) runs at 30 ticks a second on every machine,
+  still shown at 60 fps, and multiplayer lets each machine tick at its own rate.
 - **Saves** (profile, Credits, Armory, maps, films) are in `~/.local/share/reach/`; the log
   is `~/.local/share/reach/reach.log`.
 - Skip the intro video with Esc (Start); in menus Enter is A and Backspace is B.
