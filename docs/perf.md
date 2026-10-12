@@ -327,13 +327,28 @@ adds 0036, 0038 and 0039. Guest frames; times in ms.
 | race, frame_rate 144 | final | 97.2 | 10.5 | 14.0 | 15.0 | 25.4 | 62.9 | 1 |
 | race, frame_rate 120 | base | 72.3 | 13.4 | 17.6 | 18.4 | 24.0 | 51.1 | 0 |
 | race, frame_rate 120 | 0036+0038 | 82.4 | 12.5 | 16.8 | 17.6 | 26.9 | 51.4 | 2 |
+| race, frame_rate 120 | final | 90.4 | 12.0 | 13.3 | 14.2 | 36.6 | 62.1 | 1 |
 | race, frame_rate 60 | base | 59.8 | 16.8 | 17.7 | 20.1 | 27.4 | 44.9 | 0 |
 | race, frame_rate 60 | final | 60.0 | 16.8 | 17.5 | 18.1 | 35.9 | 49.6 | 1 |
 | free roam, frame_rate 144 | base | 131.4 | 7.3 | 10.5 | 11.3 | 20.5 | 79.4 | 7 |
 | free roam, frame_rate 144 | final | 140.8 | 7.1 | 8.6 | 10.6 | 21.6 | 86.6 | 5 |
 
-(Windows 11:24-11:37 and 12:07-12:20. Free roam's base is faster than the 111.5 fps in
-RecompiledForzaHorizon's table, which drove a different stretch.)
+(Windows 11:24-11:37, 12:07-12:20 and 13:31-13:38. Free roam's base is faster than the 111.5
+fps in RecompiledForzaHorizon's table, which drove a different stretch.)
+
+Reach (`tools/bench.sh gameplay`: SWAT on Sword Base, turning in place, 30 s, `--frame_rate=60`,
+same window, the current `reach` binary; "base" is Reach's patch set 0001-0037, "final" adds the
+three):
+
+| Plugin | Source | fps | p50 | p95 | p99 | max | 1% low | stutters |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| base | guest | 59.7 | 16.8 | 16.9 | 17.1 | 32.7 | 41.7 | 0 |
+| final | guest | 60.0 | 16.8 | 16.9 | 17.0 | 20.2 | 57.2 | 0 |
+| base | present | 57.0 | 16.8 | 27.3 | 38.2 | 52.9 | 22.6 | 36 |
+| final | present | 59.9 | 16.8 | 24.7 | 25.4 | 32.5 | 38.3 | 0 |
+
+Reach holds its 60 fps either way (it is not bound by the GPU emulation there); the frames
+handed to the presenter lose their stutters.
 
 **Correctness.** Race and free roam screenshots at the same race times match the base build's
 (cars, crowd, HUD, minimap; the frames differ only by the AI and timing). No new error types in
