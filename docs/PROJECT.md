@@ -194,7 +194,8 @@ Check exact param names in `endpoints.json` before calling.
     browser route, a Live party invite (the roster join is the Live path).
   - Host log: 3,000+ `[error] [gpu] Primitive processor: Unsupported tessellation mode 0 for
     primitive type 6` and failed PM4_DRAW_INDX with prim_type=6 from the map load on, only on
-    the host (the guest log has none, same scene). Nothing visibly missing. Lead: type-6
+    the host (the guest log has none, same scene). **Gone with SDK patches 0034/0035** (2026-10-12: Sword Base
+    in Forge, 3 minutes, 0 such lines; the remaining errors are a memexport constant warning and heap allocs). Nothing visibly missing. Lead: type-6
     primitives (quad/rect lists with tess_mode 0) rejected in the SDK's primitive processor.
 
 - 2026-10-09 (night): **no more water draws; System Link discovery works.**

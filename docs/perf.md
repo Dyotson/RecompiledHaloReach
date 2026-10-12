@@ -262,3 +262,19 @@ the executable's folder, see `docs/rendering.md`). The faces were a dropped tess
 fixed by SDK patch 0035.
 
 Upstream: rexglue/rexglue-sdk issue #500 and PR #501 (branch `perf/wait-multiple-epoch`).
+
+## Patch 0035 (tessellated strips drawn): cinematic cost (2026-10-12)
+
+Campaign opening at `frame_rate = 60`, 60 s of the briefing from Jorge's shot (Kat's and Carter's
+faces on screen), windowed, `RECOMP_PERF`, BENCH_LOCK held. Same `reach` binary and run folder;
+only the executable-folder `librexgpu-xenos.so` differs (the 0035 build with
+`--tessellated_strips_and_fans_as_lists=false` is the "without 0035" case: strips dropped, black faces).
+
+| plugin | frames | fps | p50 | p99 | max | stutters (>2x p50) |
+|---|---|---|---|---|---|---|
+| 0034+0035 (faces drawn) | 3595 | 59.9 | 16.8 | 17.3 | 33.8 | 3 |
+| 0035 off (faces dropped) | 3588 | 59.8 | 16.8 | 17.1 | 85.6 | 3 |
+
+No measurable cost: both hold 60 fps with p99 within 0.2 ms. (The earlier "0034 only" plugin build
+in `bin34` lost the GPU, VK_ERROR_DEVICE_LOST, 4 s into this scene, so 0034 without 0035 is not a
+usable baseline.) The 0035 run started with another game alive on the machine, so its max is noisier.

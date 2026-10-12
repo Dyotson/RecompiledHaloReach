@@ -71,28 +71,29 @@ Lavapipe (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) runs t
 the intro video, but takes more than 10 s per frame in the 3D cinematic. It is too slow to
 check a shot, but safe for anything that could hang the GPU.
 
-## Cutscene "Falcons jumping back and forth" (open, stopped 2026-10-11 at the usage limit)
+## Cutscene "Falcons jumping back and forth" (2026-10-12: partly explained)
 
-Done: the opening ran windowed at `frame_rate = 60`, with no input during the cinematics
-(`REACH_GSTRACE=1` plus three bursts of 150 consecutive frame dumps). Every frame ran exactly
-one tick (`frames by ticks 0/1/2/3+: 0/600/0/0` each 10 s). There were only the two normal
-end-of-cinematic reverts (time 13039 -> 5 and 3429 -> 9), no skip and no loop. The Falcon
-takeoff burst and the second flight burst show monotonic motion, with no frame closer to the
-one two back than to the one before.
+Setup: opening cinematic, `frame_rate = 60` and 30, one tick per frame, only the two normal
+end-of-cinematic reverts. Bursts of 150 consecutive frame dumps checked with `burst_motion.py`.
 
-**Lead:** the burst 2 s into the Falcon formation flight (`burst_350.28.txt`) alternates on
-every frame (d1 = 41, 4, 44, ...): 103 of 150 frames are back-and-forth candidates. Not
-looked at yet. It could be the real "jumping" or a fullscreen effect (a transition flash).
+- **The flagged burst is real, not a flash.** In the cabin scene of the Falcon flight (about 2 s into
+  the formation flight; same scene again at t=331 in a second 60 fps run) a foreground object (a
+  Spartan in blue armour in the near seat, Carter in the first run) is drawn on one frame and
+  absent on the next, in runs of 1-3 frames, while the background and the far Spartans move
+  smoothly. In the first run the whole shot also alternated with a second angle on every frame.
+  The two frames differ by ~28 mean grey levels, so players see it as flicker and objects
+  vanishing. Reproduced at 60 fps in two runs (103/150 and 27/150 flagged frames); other bursts
+  at 60 (takeoff, ship interior, flight) are clean (0-5 flags, cut frames).
+- **30 fps:** six bursts through the briefing and flight (150 frames each) show no alternation
+  (0-9 flags, all repeated frames). They did not land on the cabin shot, so 30 fps is not proven
+  clean for that scene; a full 30 fps run reached gameplay without visible problems.
+- **START at Jorge's shot** (60 fps) opens the pause menu ("Game Paused", Revert to last save...);
+  it is not a skip and does not revert. No jumping from it.
+- Likely area (not investigated): an object or camera drawn from stale or alternating
+  state on every other frame at 60 fps, i.e. the tick/interpolation path (`src/hooks/frame_rate.cpp`)
+  or a double-buffered render-state copy; check by running the same scene at 30 with a burst
+  timed to the cabin shot (`motion2.sh` with `OFF`/`STEP`), and by comparing object transforms
+  (guest memory) on consecutive frames.
 
-Next:
-- view `m60b/bpng/reach_frame_0350.*` in order;
-- repeat the run at 30 (`motion.sh m30 30`, stopped before it reached the flight) and with
-  `SKIP=1` (START at Jorge's shot) at 60 and 30.
-
-Scripts (session scratchpad `faces/`, may be gone):
-- `motion.sh TAG FR`: run with GSTRACE and the bursts;
-- `burst_motion.py DIR`: the d1/d2 back-and-forth detector;
-- `bench_faces.sh` + `perf_stats.py`: faces on/off perf in the briefing, not run yet (needs
-  BENCH_LOCK).
-
-Run data is in `/var/home/dyotson/faces_r/m60b` (bursts, `reach.log`).
+Scripts (session scratchpad `faces/`, may be gone): `motion.sh`/`motion2.sh TAG FR` (run with
+GSTRACE and periodic bursts), `burst_motion.py DIR` (d1/d2 detector, PNGs), `bench_ab.sh`.
