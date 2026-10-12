@@ -543,7 +543,7 @@ game once the tolerances matched.
   pair (A hosts) with dumps and side-by-side shots; `xexdiff.py`, `objfield.py`,
   `gdbwatch.sh` (a solo game with a gdb write watchpoint on one guest word).
 
-## 120 and 144 fps (2026-10-12, in progress)
+## 120 and 144 fps (2026-10-12, paused)
 
 **Now.** `frame_rate = 120` or `144` runs a 240 or 288 Hz guest vblank (288 needs SDK patch
 0037), so the game draws 120 or 144 frames a second. The simulation ticks at most 72 times a
@@ -554,6 +554,22 @@ frame is drawn, also those without a tick ("Frames without a tick", below): the 
 aiming, effects and the HUD move at the full frame rate, objects and the camera's position on
 the ticks. `REACH_TICK_RATE_MAX=0` gives the game's own rule back (one tick per frame, 144 at
 144 fps), `=N` another limit; `REACH_RENDER_TICKLESS=0` draws only frames with a tick.
+
+**State when work paused (2026-10-12).** Done and pushed: SDK patch 0037, `frame_rate` 60-240,
+the 72 tick limit, drawing frames without a tick, the clip plane and tick-field fixes, checks
+in the campaign, Firefight, System Link multiplayer and co-op, and clean numbers
+(`docs/perf.md`, "120 and 144 fps"). Drawn as they are, frames without a tick repeat the last
+tick's view (measured: a turning player's view turns 2.3-4.3 degrees on tick frames and 0 on the
+others), so at 144 fps the picture moves at 72 Hz. The view prediction for those frames is in
+`src/hooks/frame_rate.cpp` but **off by default** (`REACH_TICKLESS_VIEW=1` turns it on): in
+SWAT at 144 fps a steady turn pans about 10 px (1/3 scale) on every frame instead of 21 px on
+every other one, with the HUD and the weapon intact. Still to do before turning it on: check
+co-op at 30 ticks (one try turned too fast for the measuring script), confirm the position
+part on strafing (frame dumps near a wall), find why a CINEREC record at the end of the game
+update still shows the unpredicted observer although the drawn frames are predicted, and look
+at vehicles and scripted cameras (both excluded for now). The SDK overlay now has 0037 (the
+GPU agent installed the full patch set); the clean numbers above used the overlay's plugin
+from before 0036, 0038 and 0039. Everything is on `main`; no branch.
 
 ### Frames without a tick
 

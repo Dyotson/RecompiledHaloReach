@@ -371,8 +371,8 @@ extern "C" REX_FUNC(sub_8284FD70) {
 // cinematic camera moves with the cinematic's objects on the ticks), not in a vehicle or seat
 // (the director's target unit, TLS + 0xC8 +8, has a parent at +0x14: the vehicle around the
 // camera moves on the ticks too), and not across a jump of more than 2 m or 45 degrees in a
-// tick (respawn, teleport). Moving objects still step on the ticks. REACH_TICKLESS_VIEW=0 turns
-// the prediction off.
+// tick (respawn, teleport). Moving objects still step on the ticks. Off by default:
+// REACH_TICKLESS_VIEW=1 turns the prediction on.
 namespace {
 
 struct TickView {
@@ -460,10 +460,11 @@ bool RenderTickless() {
   return enabled;
 }
 
+// Off by default until checked further (co-op at 30 ticks, the position part, vehicles).
 bool PredictView() {
   static const bool enabled = [] {
     const char* v = std::getenv("REACH_TICKLESS_VIEW");
-    return !(v && *v == '0');
+    return v && *v && *v != '0';
   }();
   return enabled;
 }
