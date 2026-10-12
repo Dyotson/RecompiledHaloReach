@@ -639,4 +639,15 @@ uneven 60 ticks at 144 fps (2 or 3 frames per tick) was not chosen for that reas
   cinematics end with their revert the same way (`tick rate 60`). Earlier runs at 144 ticks
   (before the limit) also played into gameplay, fired and reloaded, and reverted to the last
   save from the pause menu (game time 34980 back to 26220) and played on.
+- **System Link multiplayer** (custom game, Slayer on Sword Base, two instances, profile
+  copies of `out/r60/SL{A,B}`):
+  - 144 fps host (72 ticks, network type 5) and 60 fps client (60 ticks): both in the game,
+    clocks equal (8:30 on both). Each player's position read from both processes every 30 ms
+    while both walked, turned and threw their grenades: the 144 fps player as the 60 fps
+    machine sees it within a median 4 mm (p95 2.1 cm, max 5.9 cm), the 60 fps player on the
+    144 fps machine within 1 mm (p95 2.0 cm, max 4.6 cm), no lag.
+  - 30 fps host and 144 fps client (72 ticks, network type 4): median 1 mm and 8 mm, p95
+    4.2 and 4.4 cm, max 8 cm both ways. On the client the predicted grenade count's hold
+    (`sub_82394068`) was 144 ticks and ran out after 2.0 s, as on the console; the grenade
+    throw's timers were 19 / 91 / 84 ticks as in Firefight.
 
