@@ -456,6 +456,16 @@ after the revert (tick rate 60)`, twice each, as before), then gameplay: out of 
 walking, turning and firing; guest 60.0 fps, p50 16.8 ms. The cinematic camera hook was not
 re-checked frame by frame (nothing it reads changed).
 
+**Mixed multiplayer, longer run (2026-10-12, partial).** System Link custom game, Slayer on
+Sword Base (default time limit, played to the end: "Credits earned" on both), 60 fps host and
+30 fps client, about 9.5 min, no gate. No error, kick or desync; the game clocks agreed to the
+second (5:06/5:06, 1:43/1:43, 0:09/0:09). Both players walked and turned for 24 s; each
+player's position read in both processes every 30 ms differed by a median 5 mm (p95 4.8 cm,
+max 8 cm, no lag) both ways, so no rubber-banding. The players met only briefly (grenade
+thrown by the 30 fps one, seen, no kill). Grenades at range, vehicles and the 30 host / 60
+client direction, matchmaking and campaign co-op are still open (paused: low memory).
+In this input mapping LT throws a grenade (LB does nothing).
+
 **Not checked yet** (next steps for mixed play):
 - Campaign co-op at mixed rates (only Firefight was run), and co-op through Reach Live
   instead of System Link (same game code, other transport).
