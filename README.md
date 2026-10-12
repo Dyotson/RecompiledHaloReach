@@ -16,6 +16,16 @@ plus the reverse-engineering notes and tooling needed to get it running.
 This repository contains **no game code and no game data**. You need your own copy of
 the game (see [Legal](#legal)).
 
+## Screenshots
+
+Captured from the recompiled game running natively on Linux.
+
+| | |
+|---|---|
+| ![Main menu](docs/images/reach-main-menu.jpg)<br>Main menu | ![Firefight lobby](docs/images/reach-firefight-lobby.jpg)<br>Firefight lobby |
+| ![Firefight gameplay](docs/images/reach-firefight-gameplay.jpg)<br>Firefight, 60 fps | ![Campaign cinematic](docs/images/reach-campaign-cinematic.jpg)<br>Campaign opening cinematic |
+| ![Campaign Falcon](docs/images/reach-campaign-falcon.jpg)<br>Campaign, the flight to the first mission | |
+
 ## Goals
 
 1. Run the Xbox 360 build of Halo: Reach natively on x86-64 Linux, then Windows.
