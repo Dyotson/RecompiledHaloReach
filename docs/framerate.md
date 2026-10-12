@@ -630,4 +630,13 @@ uneven 60 ticks at 144 fps (2 or 3 frames per tick) was not chosen for that reas
   144 ticks' 38), melee, death and the loadout respawn. Projectiles from the Covenant (type 5
   objects tracked in guest memory) fly 11.8 wu/s on average at both 72 and 144 ticks: speed
   per second does not depend on the tick rate.
+- **Campaign, Winter Contingency** (profile copy, offline): at 144 fps the opening and the
+  Falcon flight both end with their revert (`game_reverted 1 tick(s) after the revert (tick
+  rate 72)`: `sleep 1` is round(72 / 30) = 2 ticks there); in a CINEREC recording of the
+  flight (1500 main-loop frames) the camera and the cinematic's objects stand still on the
+  746 frames without a tick and move together on the 752 with one (no frame where the
+  camera stands while objects move; 2 cuts). At 120 fps (60 ticks, two frames per tick) both
+  cinematics end with their revert the same way (`tick rate 60`). Earlier runs at 144 ticks
+  (before the limit) also played into gameplay, fired and reloaded, and reverted to the last
+  save from the pause menu (game time 34980 back to 26220) and played on.
 

@@ -10,7 +10,7 @@ plus the reverse-engineering notes and tooling needed to get it running.
 > Online play goes through a self-hostable **Reach Live** server that stands in for
 > Xbox LIVE and Bungie's services: friends, invites, System Link over the internet and
 > File Share, plus **matchmaking** on the server's own playlists (with progression), and
-> the game can run at **60 fps** (`frame_rate = 60`). A Windows build is cross-compiled
+> the game can run at **60, 120 or 144 fps** (`frame_rate`). A Windows build is cross-compiled
 > from Linux; it has only been tried under Proton, not on Windows itself.
 
 This repository contains **no game code and no game data**. You need your own copy of
@@ -62,7 +62,7 @@ the game (see [Legal](#legal)).
 | Forge | Works locally: editing on Sword Base, object placement, saving map variants. Two players through Reach Live (one joins the other's Forge lobby from the roster): both play and switch to edit mode, a placed object shows in the other's budget, and the host saves a map variant. Checked once on Sword Base, two instances on one machine; moving and deleting objects and the System Link browser route were not tried |
 | Online | Over the internet through a self-hosted **Reach Live** server: an emulated Xbox LIVE (friends roster, presence, joining a friend, invites) and System Link (the game's browser lists everyone's games). Tested with up to three players on one machine: Firefight and Slayer through the postgame, host migration. Direct peer-to-peer with NAT hole punching, relayed by the server when that fails ([`docs/online_plan.md`](docs/online_plan.md) section 5). Matchmaking: START MATCHMAKING on a server finds other players on the server's playlists (Free For All, Team Slayer, Capture the Flag, Objective), merges the groups, loads the map and plays, then searches again; the Playlist screen shows player counts and images, and cR/rank progression comes from matchmade games. Tested with two players on one machine; more than two, Arena and the Xbox LIVE party are not available ([`docs/online_plan.md`](docs/online_plan.md) section 5.4) |
 | File share | Through Reach Live: upload maps and game types from the game's File Share UI, browse a friend's share from the roster and download into Local Files ([`docs/online_plan.md`](docs/online_plan.md) section 5.3) |
-| 60 fps | `frame_rate = 60` runs the simulation at 60 ticks a second instead of 30. Checked in the campaign, Firefight, matchmaking and System Link; online, 30 and 60 fps players play together (network co-op runs at 30 ticks a second on every machine) ([`docs/framerate.md`](docs/framerate.md)) |
+| 60, 120 and 144 fps | `frame_rate = 60` runs the simulation at 60 ticks a second instead of 30. Checked in the campaign, Firefight, matchmaking and System Link; online, 30 and 60 fps players play together (network co-op runs at 30 ticks a second on every machine). `frame_rate = 120` and `144` draw 120 or 144 frames a second with 60 or 72 ticks (two frames per tick: many of the game's tick counters are a byte); 144 needs SDK patch 0037 in the runtime ([`docs/framerate.md`](docs/framerate.md)) |
 | GPU emulation speed | SDK patches 0028-0032 cut the cost of the emulated GPU's command processor, memory watches and texture bindings. Measured in Forza Horizon (same SDK): a race went from 41 to 60 fps; Reach runs the same code (see [`docs/perf.md`](docs/perf.md)) |
 | Higher resolution | `resolution_scale = 2` in `reach.toml` (or `--resolution_scale=2`) renders at 2304×1440 instead of 1152×720; menus and Firefight checked, no artifacts seen. Frame rate on a dedicated GPU still to be measured |
 | Keyboard and mouse | On by default next to pads: Halo-style bindings (rebindable `kbm_bind_*` cvars) and raw mouse look fed straight into player control, no stick emulation ([`docs/input.md`](docs/input.md)) |
@@ -151,6 +151,10 @@ tools/play.sh --resolution_scale=2   # render at 2304x1440 instead of 1152x720
   System Link ([`docs/framerate.md`](docs/framerate.md)). Online, players at 30 and 60 fps
   play together: co-op (campaign and Firefight) runs at 30 ticks a second on every machine,
   still shown at 60 fps, and multiplayer lets each machine tick at its own rate.
+  `frame_rate = 120` or `144` draws 120 or 144 frames a second; the simulation then runs 60
+  or 72 ticks a second, each shown for two frames (the view, aiming and effects move every
+  frame). 144 needs the runtime built with SDK patch 0037 (`tools/build_rexglue_sdk.sh`);
+  without it the game runs at 120.
 - **Saves** (profile, Credits, Armory, maps, films) are in `~/.local/share/reach/`; the log
   is `~/.local/share/reach/reach.log`.
 - Skip the intro video with Esc (Start); in menus Enter is A and Backspace is B.
