@@ -19,6 +19,6 @@ sed -i -E "s/(From manifest\/hints at DecompiledHaloReach commit: ).*/\1$MAIN/; 
 cd "$DEST"
 git add -A
 if git diff --cached --quiet; then echo "generated code unchanged"; exit 0; fi
-git -c user.name=agent -c user.email=agent@local commit -q -m "Codegen output for DecompiledHaloReach@$MAIN ($SDK)"
+git commit -q -m "Codegen output for DecompiledHaloReach@$MAIN ($SDK)"
 git push -q origin HEAD
 echo "pushed generated code for $MAIN"
