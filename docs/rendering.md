@@ -90,6 +90,15 @@ start of the flight, `abpat.py` labels each frame by the image it matches):
 | 60 fps, occlusion queries off (`fl60noq`) | 5 | alternation in 3 bursts (125 flagged frames) |
 | 60 fps (`fl60cr`) | 5 | alternation in 4 bursts |
 | 60 fps with the fix (`fl60fix`) | 5 (12 s) | clean: 0-2 flags a burst, all at shot cuts |
+| 60 fps with the fix (`fl60fix2`) | 3, then 90 shots into gameplay | clean; the flight ends with its revert, then gameplay in the Falcon with the HUD |
+| 30 fps, old and new binary side by side (`fl30old`, `fl30new`) | 4 each | the same: no alternation, 12 and 10 flags (the dump artifact below) |
+
+**A frame dump artifact to ignore.** Some dumps are exact copies of the dump two swaps
+before (an X Y X Y pattern with a 0.00 difference), with consecutive guest frame numbers.
+This happens at 30 fps with both binaries (10-12 per 600 frames), and 75 times with
+`REACH_CINEREC` logging. Over the same frames the game state advanced one tick per frame,
+so these are stale copies of the front buffer in guest memory, probably the resolve
+readback. They are not the bug, and `abpat.py`'s threshold ignores them.
 
 **Ruled out.** Occlusion queries: with `--occlusion_query_enable=false` (every query
 "visible") the alternation is the same. Reach does use them, but for BSP instances
@@ -120,6 +129,10 @@ the next. The blend fraction is the part the game's truncation dropped:
 orthogonal again. There is no blend at a shot's last frame, nor across a jump of more than
 4 m or about 25 degrees (a cut inside a shot). At 30 ticks a second the fraction is 0, so
 nothing changes. `REACH_CINEMATIC_CAMERA_STEPS=1` brings back the old steps for comparisons.
+
+The hook does a few dozen float operations per frame, in cinematics only. Contended
+`RECOMP_PERF` windows of the opening cinematic read p50 16.8 ms before and after; no clean
+bench was run, because neither the GPU plugin nor the runtime changed.
 
 With the fix, the camera and the objects both move 0.43 m on every tick. The objects'
 positions relative to the camera change by 0.005 m a tick or less (`fl60fix`). The pictures
