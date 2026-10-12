@@ -297,8 +297,15 @@ bound by the emulated GPU's command processor (CP). Work state, for whoever cont
   pages that no draw in the current render pass has read is recorded before the render pass,
   sharing one barrier pair with the other uploads hoisted there, instead of ending the render
   pass for a copy between two barriers) and `vulkan_threaded_submission` (the deferred command
-  buffer is replayed into Vulkan and submitted on a "Vulkan Submission" thread). Not yet
-  measured.
+  buffer is replayed into Vulkan and submitted on a "Vulkan Submission" thread). Patch files
+  staged in the scratchpad `gpu-perf/patches/` (0036 and 0038; they apply to both repos' sets).
+- **Contended profile, Forza race at 144** (instrumented plugin, same binary, cvars off/on):
+  render pass instances 52,000/s -> 10,600/s, barriers 133,000/s -> 27,000/s, 73,000 uploads/s
+  hoisted (none had been read in its render pass), replay 11.4% of the CP -> 0 (10% of the new
+  thread), draws 370,000/s -> 402,000/s, 70.7 -> 77.0 fps. The CP stays 99.7% busy: next
+  hotspots (CP self+children): memcpy of uploads 8% (2 GB/s, 510,000 pages/s re-uploaded after
+  CPU writes), `UpdateBindings` 14% (half in RADV descriptor updates), type-0 register writes
+  13%, `RequestTextures` 6.5%, render target `Update` 6%.
 - **First counters** (instrumented base plugin, Forza loading into free roam at 144, CP busy
   99.7%): 250,000 draws/s, 14,500 render pass instances/s, 34,000 barriers/s, 18,000
   dispatches/s; only ~700 vertex/index uploads/s happened inside a render pass, none of them on
