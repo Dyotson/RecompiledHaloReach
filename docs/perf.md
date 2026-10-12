@@ -306,6 +306,14 @@ bound by the emulated GPU's command processor (CP). Work state, for whoever cont
   hotspots (CP self+children): memcpy of uploads 8% (2 GB/s, 510,000 pages/s re-uploaded after
   CPU writes), `UpdateBindings` 14% (half in RADV descriptor updates), type-0 register writes
   13%, `RequestTextures` 6.5%, render target `Update` 6%.
+- **The 2 GB/s of uploads were the SDK's `clear_memory_page_state = true`** (Xenia: false, a fix
+  for Team Ninja games): after every frame every page the CPU had written and the GPU read was
+  invalidated and uploaded again. Off (SDK patch 0039): 1,800 uploads/s (7,000 pages) instead of
+  74,000 (510,000 pages) in the race at 144.
+- **Clean window 1 (11:24-11:37), Forza race, guest fps / p99 ms:** 144: base 72.8 / 18.7,
+  0036+0038 78.8 / 17.4, 0036+0038 with `--clear_memory_page_state=false` 93.2 / 15.9; 120: base
+  72.3 / 18.4, 0036+0038 82.4 / 17.6. Still to measure: race 60, free roam 144, race 120 with
+  0039, Reach SWAT at 60 (sets `clean2.txt`, `clean3.sh` in the scratchpad).
 - **First counters** (instrumented base plugin, Forza loading into free roam at 144, CP busy
   99.7%): 250,000 draws/s, 14,500 render pass instances/s, 34,000 barriers/s, 18,000
   dispatches/s; only ~700 vertex/index uploads/s happened inside a render pass, none of them on

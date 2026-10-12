@@ -1,0 +1,22 @@
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index 8effb75..7892600 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -37,9 +37,14 @@
+ 
+ REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
+ 
+-REXCVAR_DEFINE_BOOL(clear_memory_page_state, true, "GPU",
+-                    "Refresh page-valid state from GPU-written memory at frame end. "
+-                    "Disable for minor CPU overhead reduction, but may break memory coherency.")
++// Off as in Xenia, where it is a fix for Team Ninja games (missing character models). On, every
++// page the CPU wrote and the GPU read is uploaded again after every frame, written or not: in a
++// Forza race that is ~500,000 pages (2 GB) a second of copies on the command processor thread.
++// Pages the CPU writes are still caught by the write watches and uploaded again when used.
++REXCVAR_DEFINE_BOOL(clear_memory_page_state, false, "GPU",
++                    "Refresh page-valid state from GPU-written memory at frame end, so that "
++                    "everything the CPU wrote is uploaded again (Xenia uses it for Team Ninja "
++                    "games). Costs a full re-upload of the frame's CPU-written GPU data.")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+ REXCVAR_DEFINE_BOOL(occlusion_query_enable, true, "GPU", "Enable host occlusion query handling")
