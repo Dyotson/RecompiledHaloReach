@@ -230,10 +230,11 @@ menu camera's sway and the race timing). In Reach (`tools/bench.sh menu`, Reach'
 with and without 0028-0032, its own runtime with and without 0028) the main menu renders the
 same (mean pixel difference 1/255, only the moving clouds) and holds its 30 fps cap.
 
-Not done (bigger changes): the 45,000 vertex uploads a second each end the render pass for a
-copy and a barrier (about 40,000 render pass instances and 100,000 barriers a second), which
-is where most of the driver time goes; replaying the deferred command buffer on another
-thread would take that off the command processor. The SDK's `Audio Worker` thread spins at
+Then (bigger changes): the 45,000 vertex uploads a second each ended the render pass for a
+copy and a barrier (about 40,000 render pass instances and 100,000 barriers a second), and
+the deferred command buffer was replayed on the command processor thread. Both are fixed by
+0036 and 0038, and most of those uploads were the SDK's `clear_memory_page_state` default
+(0039): see "GPU emulation at high refresh rates" below. The SDK's `Audio Worker` thread spins at
 ~75% of a core in `PosixConditionBase::WaitMultiple` (runtime): fixed by 0033 (below).
 
 ## Patch 0033: `WaitMultiple` sleeps until a handle is signalled (2026-10-11)
@@ -279,47 +280,87 @@ No measurable cost: both hold 60 fps with p99 within 0.2 ms. (The earlier "0034 
 in `bin34` lost the GPU, VK_ERROR_DEVICE_LOST, 4 s into this scene, so 0034 without 0035 is not a
 usable baseline.) The 0035 run started with another game alive on the machine, so its max is noisier.
 
-## GPU emulation at high refresh rates: render pass breaks and the submission thread (in progress, 2026-10-12)
+## GPU emulation at high refresh rates (SDK patches 0036, 0038, 0039; 2026-10-12)
 
-Goal: Forza races above 60 fps (75.7 fps at a 120 target, 70.1 at 144; free roam 111-115) are
-bound by the emulated GPU's command processor (CP). Work state, for whoever continues:
+Forza Horizon races above 60 fps (75.7 fps at a 120 target, 70.1 at 144, free roam 111-115)
+were bound by the emulated GPU's command processor (CP): its thread was busy 99.7% of the time
+and the guest render thread spun in D3D's `BlockOnFence`. Profiled as for 0028-0032
+(frame-pointer sampling, a wall-clock sampler of the CP thread, temporary counters).
 
-- **Trees.** `~/rexglue-sdk-src-gpu/sdk`, branch `fz37` (Forza's patch set 0001-0037 committed as
-  `dc567b4`, then one WIP commit per change); `sdk-reach`, branch `reach35` (Reach's set,
-  `a97941d`); `sdk-fp` is the profiling build (frame pointers + counters from
-  `~/rexglue-sdk-src-gpu/instr/instr.py` and `instr_extra.py`: render pass begins, uploads by
-  caller and whether a draw in the current render pass had read the uploaded pages, replay
-  time on the CP and on the submission thread). Scripts in the session scratchpad `gpu-perf/`:
-  `build_sdk.sh`, `build_pair.sh NAME` (std + instrumented plugin), `build_reach_pair.sh`,
-  `fzb.sh race|freeroam DIR PLUGIN FR` (Forza snapshot binary `forza-recomp/out/build/gp-snap37`
-  copied into `gp2-<plugin>` with the plugin; refuses below 12 GB available), `runset.sh SETFILE`.
-- **Changes (cvars, both default on):** `vulkan_hoist_shared_memory_uploads` (an upload of
-  pages that no draw in the current render pass has read is recorded before the render pass,
-  sharing one barrier pair with the other uploads hoisted there, instead of ending the render
-  pass for a copy between two barriers) and `vulkan_threaded_submission` (the deferred command
-  buffer is replayed into Vulkan and submitted on a "Vulkan Submission" thread). Patch files
-  staged in the scratchpad `gpu-perf/patches/` (0036 and 0038; they apply to both repos' sets).
-- **Contended profile, Forza race at 144** (instrumented plugin, same binary, cvars off/on):
-  render pass instances 52,000/s -> 10,600/s, barriers 133,000/s -> 27,000/s, 73,000 uploads/s
-  hoisted (none had been read in its render pass), replay 11.4% of the CP -> 0 (10% of the new
-  thread), draws 370,000/s -> 402,000/s, 70.7 -> 77.0 fps. The CP stays 99.7% busy: next
-  hotspots (CP self+children): memcpy of uploads 8% (2 GB/s, 510,000 pages/s re-uploaded after
-  CPU writes), `UpdateBindings` 14% (half in RADV descriptor updates), type-0 register writes
-  13%, `RequestTextures` 6.5%, render target `Update` 6%.
-- **The 2 GB/s of uploads were the SDK's `clear_memory_page_state = true`** (Xenia: false, a fix
-  for Team Ninja games): after every frame every page the CPU had written and the GPU read was
-  invalidated and uploaded again. Off (SDK patch 0039): 1,800 uploads/s (7,000 pages) instead of
-  74,000 (510,000 pages) in the race at 144.
-- **Clean window 1 (11:24-11:37), Forza race, guest fps / p99 ms:** 144: base 72.8 / 18.7,
-  0036+0038 78.8 / 17.4, 0036+0038 with `--clear_memory_page_state=false` 93.2 / 15.9; 120: base
-  72.3 / 18.4, 0036+0038 82.4 / 17.6. Still to measure: race 60, free roam 144, race 120 with
-  0039, Reach SWAT at 60 (sets `clean2.txt`, `clean3.sh` in the scratchpad).
-- **First counters** (instrumented base plugin, Forza loading into free roam at 144, CP busy
-  99.7%): 250,000 draws/s, 14,500 render pass instances/s, 34,000 barriers/s, 18,000
-  dispatches/s; only ~700 vertex/index uploads/s happened inside a render pass, none of them on
-  pages a draw in that render pass had read; replaying the deferred command buffer took 7.9% of
-  the CP thread.
-- **Machine hazard found:** the kernel's TTM page pool (`GPUReclaim` in `/proc/meminfo`) grew to
-  16 GB (its cap, half of RAM) over many game runs; with zram nearly full, amdgpu command
-  submission failed with ENOMEM and the game lost its device (`Not enough memory for command
-  submission` in the kernel log). Check `GPUReclaim` and `MemAvailable` before launching.
+**What the CP did in a race at 144** (370,000 draws, 13 million register writes a second):
+
+- 74,000 vertex and index uploads a second (510,000 pages, 2 GB), each ending the render pass
+  for a copy between two barriers: 52,000 render pass instances and 133,000 barriers a second.
+  None of the uploaded pages had been read by a draw in the render pass the upload ended.
+- Replaying the deferred command buffer into Vulkan at each submission: 11% of the thread.
+- The 2 GB/s were not CPU writes: the SDK defaults `clear_memory_page_state` to true (Xenia:
+  false; it is a fix for Team Ninja games), so after every frame every page the CPU had written
+  and the GPU read was invalidated and uploaded again. Off, 1,800 uploads (7,000 pages) a second
+  remain: the vertex data the game really rewrites.
+
+**The patches** (`docs/sdk_patches.md`):
+
+| Patch | Change |
+| --- | --- |
+| 0036 | An upload of pages that no draw in the current render pass has read is recorded before that render pass (a hoist point the deferred command buffer replays from a second stream), after the barriers already there; the uploads hoisted before one render pass share one barrier pair. Draws mark the pages they read (vertex fetch, guest indices, memexport) in a per-render-pass bitmap; an upload of marked pages ends the render pass as before. `vulkan_hoist_shared_memory_uploads` |
+| 0038 | A "Vulkan Submission" thread replays the deferred command buffer and submits it; the CP hands the streams over and goes on. Fences are only waited for once the thread has submitted them; the guest output refresh waits for its submission so the presenter's own submission comes after it. `vulkan_threaded_submission` |
+| 0039 | `clear_memory_page_state` off by default, as in Xenia |
+
+With all three in a race at 144: 10,600 render pass instances and 27,000 barriers a second,
+1,000-1,800 uploads, the replay on its own thread (11% of a core), and 430,000 draws a second
+on a CP thread that now runs 87% of the time (wall-clock samples; the rest is the flip wait
+and 4% waiting for the swap's submission).
+
+**Results.** Forza (RecompiledForzaHorizon `tools`-style scenario, scratchpad `gpu-perf/fzb.sh`:
+the race is GoPro Millennia Masters from the spawn of the user's Xenia save, throttle held for
+26 s from the countdown; free roam 50 s of throttle), warm caches, windowed, BENCH_LOCK windows
+with one game at a time, runs back to back (so the load average at each start is the previous
+run's game). Same game binary (snapshot `gp-snap37`) and runtime for all; only the
+executable-folder plugin differs: "base" is the Forza patch set as shipped (0001-0037), "final"
+adds 0036, 0038 and 0039. Guest frames; times in ms.
+
+| Scenario | Plugin | fps | p50 | p95 | p99 | max | 1% low | stutters |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| race, frame_rate 144 | base | 72.8 | 13.9 | 17.7 | 18.7 | 26.6 | 50.8 | 0 |
+| race, frame_rate 144 | 0036+0038 | 78.8 | 13.5 | 15.9 | 17.4 | 26.7 | 53.8 | 0 |
+| race, frame_rate 144 | 0036+0038, `--clear_memory_page_state=false` | 93.2 | 10.6 | 14.3 | 15.9 | 23.7 | 54.9 | 2 |
+| race, frame_rate 144 | final | 97.2 | 10.5 | 14.0 | 15.0 | 25.4 | 62.9 | 1 |
+| race, frame_rate 120 | base | 72.3 | 13.4 | 17.6 | 18.4 | 24.0 | 51.1 | 0 |
+| race, frame_rate 120 | 0036+0038 | 82.4 | 12.5 | 16.8 | 17.6 | 26.9 | 51.4 | 2 |
+| race, frame_rate 60 | base | 59.8 | 16.8 | 17.7 | 20.1 | 27.4 | 44.9 | 0 |
+| race, frame_rate 60 | final | 60.0 | 16.8 | 17.5 | 18.1 | 35.9 | 49.6 | 1 |
+| free roam, frame_rate 144 | base | 131.4 | 7.3 | 10.5 | 11.3 | 20.5 | 79.4 | 7 |
+| free roam, frame_rate 144 | final | 140.8 | 7.1 | 8.6 | 10.6 | 21.6 | 86.6 | 5 |
+
+(Windows 11:24-11:37 and 12:07-12:20. Free roam's base is faster than the 111.5 fps in
+RecompiledForzaHorizon's table, which drove a different stretch.)
+
+**Correctness.** Race and free roam screenshots at the same race times match the base build's
+(cars, crowd, HUD, minimap; the frames differ only by the AI and timing). No new error types in
+the logs, no GPU hang. Reach SWAT on Sword Base at 60 with the Reach set plus the three patches
+renders the same as without (decals, HUD, menus). The instrumented builds are the only ones
+that ever lost the device, from a bug in the temporary counters (see below).
+
+**Machine hazards found on the way.** The kernel's TTM page pool (`GPUReclaim` in
+`/proc/meminfo`) can hold up to half of RAM; once it was at 16 GB with zram nearly full,
+amdgpu command submission failed with ENOMEM ("Not enough memory for command submission") and
+the game lost its device. The first time it was full from many runs; the second time an
+instrumentation bug (an operator-precedence slip that made every `LoadTextureData` fail, so
+Forza created and destroyed 3D-as-2D wrapper images in a loop) filled it within 90 s. Check
+`GPUReclaim` and `MemAvailable` before launching; `fzb.sh` stops a game when the pool passes
+10 GB or a texture-load failure loop shows in the log.
+
+**Next hotspots** (CP thread, final build, race at 144): `UpdateBindings` 17% (descriptor set
+allocation and `vkUpdateDescriptorSets`, half in RADV), type-0 register writes 14%, hash lookups
+8% (`LoadShader` hashing every shader load, texture and view lookups, pipeline lookups),
+render target `Update` 7%, memcpy 6% (constants), `RequestTextures` 6%. The CP waits 4% of the
+time for the submission thread at each swap.
+
+**Tools** (session scratchpad `gpu-perf/`, recreate from here if it is gone): `build_sdk.sh
+std|fp|reach PLUGIN [RUNTIME]` builds `librexgpu-xenos.so` from `~/rexglue-sdk-src-gpu/sdk`
+(branch `fz37`: Forza's set as `dc567b4`, then one commit per patch), `sdk-fp` (frame pointers +
+`~/rexglue-sdk-src-gpu/instr/instr.py` and `instr_extra.py` counters) or `sdk-reach` (branch
+`reach35`); `fzb.sh race|freeroam DIR PLUGIN FR [flags]` runs Forza with that plugin from a
+binary snapshot; `runset.sh SETFILE` runs a list of them one game at a time; `reachb.sh` and
+`reach_ab.sh` do the same for Reach (`tools/bench.sh gameplay`); `cgreport.py` and
+`offreport.py` read the samplers' output.
