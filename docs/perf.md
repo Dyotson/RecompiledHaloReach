@@ -350,6 +350,11 @@ three):
 Reach holds its 60 fps either way (it is not bound by the GPU emulation there); the frames
 handed to the presenter lose their stutters.
 
+Installed 2026-10-12 (`tools/build_rexglue_sdk.sh` in both projects: the overlays
+`~/rexglue-sdk-patched` and `~/rexglue-sdk-patched-forza`, and the builds next to them).
+`--vulkan_hoist_shared_memory_uploads=false`, `--vulkan_threaded_submission=false` and
+`--clear_memory_page_state=true` switch each change off.
+
 **Correctness.** Race and free roam screenshots at the same race times match the base build's
 (cars, crowd, HUD, minimap; the frames differ only by the AI and timing). No new error types in
 the logs, no GPU hang. Reach SWAT on Sword Base at 60 with the Reach set plus the three patches

@@ -159,8 +159,10 @@ echo "patched codegen: $OVERLAY/bin/rexglue"
 # POST_BUILD step only re-copies it when reach relinks). Builds against other
 # SDK versions keep their own plugin: it must match their librexruntime.so.
 for build in "$ROOT"/reach-recomp/out/build/*/; do
-    [ -f "$build/librexgpu-xenos.so" ] || continue
-    sdk_dir="$(sed -n 's/^rexglue_DIR:PATH=//p' "$build/CMakeCache.txt" 2>/dev/null)"
+    # Copies of a build made for tests have the plugin but no CMakeCache.txt; under set -e the
+    # sed would end the script before it reached the others.
+    [ -f "$build/librexgpu-xenos.so" ] && [ -f "$build/CMakeCache.txt" ] || continue
+    sdk_dir="$(sed -n 's/^rexglue_DIR:PATH=//p' "$build/CMakeCache.txt")"
     case "$sdk_dir" in
         "$NIGHTLY"/*|"$OVERLAY"/*)
             # Rename over it: running instances may have the old file mapped.
