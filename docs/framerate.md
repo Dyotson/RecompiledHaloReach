@@ -679,4 +679,10 @@ tick) was not chosen for that reason.
     4.2 and 4.4 cm, max 8 cm both ways. On the client the predicted grenade count's hold
     (`sub_82394068`) was 144 ticks and ran out after 2.0 s, as on the console; the grenade
     throw's timers were 19 / 91 / 84 ticks as in Firefight.
+- **System Link Firefight co-op**, 144 fps host and 30 fps client (both 30 ticks, network type
+  3 / 2; frames without a tick drawn on the host): two games on Overlook, AI fighting the
+  players, deaths and respawns. Both machines' game times stayed in step (within 4-6 ticks at
+  every 15 s sample), the Firefight clocks equal on both screens, and both games ran to their
+  normal end (4.5 min the second time: scoreboard, then "Credits earned: game complete" on both
+  machines). No co-op error.
 
