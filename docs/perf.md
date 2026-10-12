@@ -379,3 +379,33 @@ std|fp|reach PLUGIN [RUNTIME]` builds `librexgpu-xenos.so` from `~/rexglue-sdk-s
 binary snapshot; `runset.sh SETFILE` runs a list of them one game at a time; `reachb.sh` and
 `reach_ab.sh` do the same for Reach (`tools/bench.sh gameplay`); `cgreport.py` and
 `offreport.py` read the samplers' output.
+
+## 120 and 144 fps (2026-10-12)
+
+`frame_rate = 144` (288 Hz guest vblank, SDK patch 0037 in the runtime, 72 ticks a second with
+the frames without a tick drawn) and `120` (240 Hz, 60 ticks), against 60 and two 144
+variants (`docs/framerate.md`, "120 and 144 fps"). `tools/bench.sh`, 30 s measured, warm
+caches, windowed 1280x720, FIFO, a reserved machine (all runs `machine: clean`), run folder
+`out/build/fr144` (the plugin of the overlay as of 2026-10-12 morning, i.e. without 0036, 0038
+and 0039; runtime: Reach's set plus 0037). Gameplay is SWAT on Sword Base, turning in place.
+
+| Run | guest fps | p50 | p95 | p99 | max | 1% low | present fps | present p95 | CPU % | GPU % |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| gameplay, 60 | 60.0 | 16.8 | 16.9 | 16.9 | 17.1 | 59.1 | 60.0 | 24.6 | 102 | 67 |
+| gameplay, 120 (60 ticks) | 111.1 | 8.4 | 12.7 | 13.1 | 20.8 | 70.7 | 92.9 | 22.2 | 181 | 92 |
+| gameplay, 144 (72 ticks) | 125.8 | 7.4 | 13.6 | 14.6 | 18.1 | 65.9 | 106.9 | 24.8 | 191 | 90 |
+| gameplay, 144, 144 ticks (`REACH_TICK_RATE_MAX=0`) | 133.0 | 7.4 | 10.6 | 12.5 | 14.9 | 73.8 | 108.3 | 19.8 | 198 | 93 |
+| gameplay, 144, frames with a tick only (`REACH_RENDER_TICKLESS=0`) | 71.5 | 13.7 | 14.8 | 16.4 | 46.4 | 29.7 | 68.0 | 23.8 | 164 | 76 |
+| main menu, 144 (72 ticks) | 143.4 | 7.4 | 7.4 | 7.4 | 21.0 | 98.4 | 143.4 | 7.5 | 153 | 78 |
+| main menu, 144, frames with a tick only (earlier window) | 72.0 | 13.7 | 14.8 | 14.8 | 18.2 | 66.3 | 72.0 | 14.9 | 137 | 39 |
+
+- The menus hold 144. In gameplay the emulated GPU is the limit (the whole GPU 90% busy):
+  125.8 fps at 144, frames come in whole guest vblanks (6.9 or 13.9 ms), and 1 in 7 takes two
+  vblanks. 144 ticks a second runs slightly faster than 72 with every frame drawn (133.0):
+  the frames without a tick cost as much to draw as the others, and the tick itself is cheap
+  next to the GPU emulation.
+- The window's presents (`present`) are fewer than the guest's frames at 120 and 144 (93 and
+  107 a second, p95 22-25 ms): FIFO in a window on a 144 Hz display, with the GPU this busy,
+  the compositor takes a new image on most refreshes but not all.
+- Drawing only the frames with a tick (the game's own behaviour) halves the frame rate: 71.5
+  in gameplay, 72.0 on the menu.
