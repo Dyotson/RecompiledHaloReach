@@ -70,6 +70,7 @@
 #include <rex/system/xmemory.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -355,29 +356,202 @@ extern "C" REX_FUNC(sub_8284FD70) {
 // fps every frame has a tick, but with fewer ticks than frames (72 ticks at 144 fps, co-op's 30
 // ticks at 60 or 144 fps) only the frames with a tick were drawn, 72 or 30 a second. Here such a
 // frame gets bit 0x10 (no other user seen) when the game ticks less often than it draws, so
-// every frame is drawn: the camera's look, aiming, effects and the HUD, which update every
-// frame, move at the full frame rate; objects and the camera's position change on ticks only
-// (the frame without a tick shows them where the last tick left them: no interpolation).
-// REACH_RENDER_TICKLESS=0 turns this off.
-extern "C" REX_FUNC(sub_820E1B60) {
+// every frame is drawn. REACH_RENDER_TICKLESS=0 turns this off.
+//
+// Drawn as it is, such a frame repeats the last tick's view: the player's look is integrated
+// over the ticks of the frame (sub_8247C978 gets ticks * seconds per tick), and the observer
+// camera (TLS + 0x354, the first local player's: +0x148 position, +0x170 forward, +0x17C up) is
+// only set on the ticks, so without a tick the camera neither turns nor moves. For such a frame
+// the view is predicted, for drawing only: before the observer's per-frame post-process
+// (sub_821EF820 -> sub_82457A20, which feeds the HUD and the views the frame is drawn with), the
+// observer is moved on by the last tick's motion (the change between the last two frames with a
+// tick) times the part of a tick since the last one; after sub_820E1B60 has handed the frame to
+// the render thread the observer gets its values back, before the next frame's ticks. Only on
+// foot in the player's own view: not while a scripted camera plays (TLS + 0x44, mode +2: the
+// cinematic camera moves with the cinematic's objects on the ticks), not in a vehicle or seat
+// (the director's target unit, TLS + 0xC8 +8, has a parent at +0x14: the vehicle around the
+// camera moves on the ticks too), and not across a jump of more than 2 m or 45 degrees in a
+// tick (respawn, teleport). Moving objects still step on the ticks. REACH_TICKLESS_VIEW=0 turns
+// the prediction off.
+namespace {
+
+struct TickView {
+  bool valid = false;
+  double t = 0;           // seconds (steady clock) when the frame was handed over
+  uint32_t observer = 0;  // address of the observer the values came from
+  float pos[3], fwd[3], up[3];
+};
+TickView view_last, view_prev;  // main thread only
+
+double NowSeconds() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void LoadVec(const uint8_t* p, float* v) {
+  for (int i = 0; i < 3; ++i) v[i] = LoadBEFloat(p + 4 * i);
+}
+
+void StoreVec(uint8_t* p, const float* v) {
+  for (int i = 0; i < 3; ++i) StoreBEFloat(p + 4 * i, v[i]);
+}
+
+void Cross(const float* a, const float* b, float* out) {
+  out[0] = a[1] * b[2] - a[2] * b[1];
+  out[1] = a[2] * b[0] - a[0] * b[2];
+  out[2] = a[0] * b[1] - a[1] * b[0];
+}
+
+float Dot(const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+// Rotates v by `angle` radians about the unit axis k (Rodrigues).
+void Rotate(const float* v, const float* k, float angle, float* out) {
+  float kxv[3];
+  Cross(k, v, kxv);
+  const float c = std::cos(angle), s = std::sin(angle), kv = Dot(k, v) * (1 - c);
+  for (int i = 0; i < 3; ++i) out[i] = v[i] * c + kxv[i] * s + k[i] * kv;
+}
+
+// The rotation that takes the basis (f0, u0) to (f1, u1) as an axis and an angle.
+bool DeltaRotation(const float* f0, const float* u0, const float* f1, const float* u1, float* axis,
+                   float* angle) {
+  float l0[3], l1[3];
+  Cross(u0, f0, l0);
+  Cross(u1, f1, l1);
+  // R = B1 * B0^T with the bases as columns (f, l, u).
+  float r[3][3];
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) r[i][j] = f1[i] * f0[j] + l1[i] * l0[j] + u1[i] * u0[j];
+  const float trace = r[0][0] + r[1][1] + r[2][2];
+  const float a = std::acos(std::clamp((trace - 1) / 2, -1.0f, 1.0f));
+  if (a < 1e-5f) {
+    *angle = 0;
+    axis[0] = 0, axis[1] = 0, axis[2] = 1;
+    return true;
+  }
+  axis[0] = r[2][1] - r[1][2], axis[1] = r[0][2] - r[2][0], axis[2] = r[1][0] - r[0][1];
+  const float n = std::sqrt(Dot(axis, axis));
+  if (n < 1e-6f) return false;  // close to 180 degrees: no prediction
+  for (int i = 0; i < 3; ++i) axis[i] /= n;
+  *angle = a;
+  return true;
+}
+
+// The first local player's view may be predicted: no scripted camera, a target unit on foot.
+bool OnFootOwnView(uint8_t* base, uint32_t tls) {
+  const uint32_t scripted = LoadBE32(GuestPtr(base, tls + 0x44));
+  if (!scripted || int16_t(GuestPtr(base, scripted)[2] << 8 | GuestPtr(base, scripted)[3]) != 0) return false;
+  const uint32_t director = LoadBE32(GuestPtr(base, tls + 0xC8));
+  const uint32_t data = LoadBE32(GuestPtr(base, tls + 0x18));
+  if (!director || !data) return false;
+  const uint32_t unit = LoadBE32(GuestPtr(base, director + 8));
+  if (unit == 0xFFFFFFFFu || unit == 0) return false;
+  const uint32_t elements = LoadBE32(GuestPtr(base, data + 0x44));
+  const uint8_t* header = GuestPtr(base, elements + (unit & 0xFFFF) * 0x10);
+  if (uint16_t(header[0] << 8 | header[1]) != unit >> 16) return false;
+  const uint32_t object = LoadBE32(header + 0xC);
+  return object && LoadBE32(GuestPtr(base, object + 0x14)) == 0xFFFFFFFFu;
+}
+
+bool RenderTickless() {
   static const bool enabled = [] {
     const char* v = std::getenv("REACH_RENDER_TICKLESS");
     return !(v && *v == '0');
   }();
-  if (enabled && REXCVAR_GET(frame_rate) > 30) {
-    const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+  return enabled;
+}
+
+bool PredictView() {
+  static const bool enabled = [] {
+    const char* v = std::getenv("REACH_TICKLESS_VIEW");
+    return !(v && *v == '0');
+  }();
+  return enabled;
+}
+
+// The game ticks less often than it draws (and so has frames without a tick).
+bool FewerTicksThanFrames(uint8_t* base, uint32_t tls) {
+  const uint32_t game_time = LoadBE32(GuestPtr(base, tls + 0x6C));
+  if (!game_time || REXCVAR_GET(frame_rate) <= 30) return false;
+  const uint8_t* gt = GuestPtr(base, game_time);
+  const int tick_rate = int16_t(gt[4] << 8 | gt[5]);
+  return tick_rate > 0 && tick_rate < REXCVAR_GET(frame_rate);
+}
+
+uint8_t view_saved[0x40];      // the observer's +0x148..+0x187 before the prediction
+uint32_t view_saved_at = 0;    // its address while a prediction is in place, else 0
+
+void RestoreView(uint8_t* base) {
+  if (!view_saved_at) return;
+  std::memcpy(GuestPtr(base, view_saved_at), view_saved, sizeof(view_saved));
+  view_saved_at = 0;
+}
+
+REX_EXTERN(__imp__sub_821EF820);  // per-frame updates after the ticks, among them the observer's post-process
+
+}  // namespace
+
+// sub_821EF820(dt), called once a frame from the game update after the ticks (return address
+// 0x82440774), runs the observer's per-frame post-process (sub_82457A20: shake, then +0x148,
+// +0x170, +0x17C written back) before the HUD and the views are set up: the prediction goes in
+// here and is taken out again after sub_820E1B60 has handed the frame over.
+extern "C" REX_FUNC(sub_821EF820) {
+  const uint32_t lr = uint32_t(ctx.lr);
+  RestoreView(base);  // a frame that never reached sub_820E1B60
+  const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+  if (lr != 0x82440774 || !RenderTickless() || !PredictView() || !FewerTicksThanFrames(base, tls))
+    return __imp__sub_821EF820(ctx, base);
+  const uint32_t frame_addr = LoadBE32(GuestPtr(base, tls + 0x80));
+  const uint32_t observers = LoadBE32(GuestPtr(base, tls + 0x354));
+  if (!frame_addr || !observers) return __imp__sub_821EF820(ctx, base);
+  uint8_t* obs = GuestPtr(base, observers);
+  const double now = NowSeconds();
+  // +0x10 of the frame: ticks since the last drawn frame (every frame is drawn here).
+  if (LoadBE32(GuestPtr(base, frame_addr + 0x10)) != 0) {
+    view_prev = view_last;
+    view_last.valid = true;
+    view_last.t = now;
+    view_last.observer = observers;
+    LoadVec(obs + 0x148, view_last.pos);
+    LoadVec(obs + 0x170, view_last.fwd);
+    LoadVec(obs + 0x17C, view_last.up);
+    return __imp__sub_821EF820(ctx, base);
+  }
+  if (view_last.valid && view_prev.valid && view_last.observer == observers &&
+      view_prev.observer == observers && view_last.t > view_prev.t && OnFootOwnView(base, tls)) {
+    float pos[3], fwd[3], up[3], axis[3], angle = 0, step[3];
+    LoadVec(obs + 0x148, pos);
+    LoadVec(obs + 0x170, fwd);
+    LoadVec(obs + 0x17C, up);
+    for (int i = 0; i < 3; ++i) step[i] = view_last.pos[i] - view_prev.pos[i];
+    const float f = float(std::clamp((now - view_last.t) / (view_last.t - view_prev.t), 0.0, 1.0));
+    if (Dot(step, step) < 4.0f &&
+        DeltaRotation(view_prev.fwd, view_prev.up, view_last.fwd, view_last.up, axis, &angle) &&
+        angle < 0.785f) {
+      float pf[3], pu[3], pp[3];
+      Rotate(fwd, axis, angle * f, pf);
+      Rotate(up, axis, angle * f, pu);
+      for (int i = 0; i < 3; ++i) pp[i] = pos[i] + step[i] * f;
+      std::memcpy(view_saved, obs + 0x148, sizeof(view_saved));
+      view_saved_at = observers + 0x148;
+      StoreVec(obs + 0x148, pp);
+      StoreVec(obs + 0x170, pf);
+      StoreVec(obs + 0x17C, pu);
+    }
+  }
+  __imp__sub_821EF820(ctx, base);
+}
+
+extern "C" REX_FUNC(sub_820E1B60) {
+  const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+  if (RenderTickless() && FewerTicksThanFrames(base, tls)) {
     const uint32_t frame_addr = LoadBE32(GuestPtr(base, tls + 0x80));
-    const uint32_t game_time = LoadBE32(GuestPtr(base, tls + 0x6C));
-    if (frame_addr && game_time) {
+    if (frame_addr) {
       uint8_t* frame = GuestPtr(base, frame_addr);
-      const uint8_t* gt = GuestPtr(base, game_time);
-      const int tick_rate = int16_t(gt[4] << 8 | gt[5]);
       const uint32_t flags = LoadBE32(frame);
-      if ((flags & 0x3FFF) == 0 && tick_rate > 0 && tick_rate < REXCVAR_GET(frame_rate)) {
-        StoreBE32(frame, flags | 0x10);
-      }
+      if ((flags & 0x3FFF) == 0) StoreBE32(frame, flags | 0x10);  // drawn as well
+      if (flags & 0x2042) view_last.valid = false;  // paused (0x2, 0x40), a state change (0x2000)
     }
   }
   __imp__sub_820E1B60(ctx, base);
+  RestoreView(base);
 }
-
