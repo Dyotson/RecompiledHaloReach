@@ -18,7 +18,8 @@
 // to FILE: the guest frames handed to VdSwap so far, the game time, the frame's ticks, the
 // vblank counter, blocks of thread globals (REACH_CINEREC_BLOCKS="off:size,...", default the
 // cinematic, observer, director, scripted camera and game time globals) and the positions of
-// the cinematic's objects. While it records, each view's cinematic clip planes are logged.
+// the cinematic's objects (without a cinematic, of the players' units). While it records,
+// each view's cinematic clip planes are logged.
 // tools/cinerec.py reads the file. Used to find what alternated between frames in cinematics
 // at frame_rate = 60: the shot camera moved at 30 Hz (docs/rendering.md).
 
@@ -224,6 +225,23 @@ void CineRecord(PPCContext& ctx, uint8_t* base) {
       if (handle == 0xFFFFFFFFu) continue;
       const uint32_t object = LoadBE32(GuestPtr(base, elements + (handle & 0xFFFF) * 0x10 + 0xC));
       std::memcpy(objects + used, GuestPtr(base, cine + 0x1C + 12 * i), 4);
+      if (object) std::memcpy(objects + used + 4, GuestPtr(base, object + 0x20), 12);
+      used += 16;
+    }
+  }
+  // Without a cinematic: the players' units instead (players data array, TLS +0x20: 0x578-byte
+  // datums, unit handle at +0x28), so gameplay motion can be compared with the camera's.
+  const uint32_t players = LoadBE32(GuestPtr(base, tls + 0x20));
+  if (used == 0 && players && data) {
+    const uint32_t elements = LoadBE32(GuestPtr(base, data + 0x44));
+    const uint32_t pdata = LoadBE32(GuestPtr(base, players + 0x44));
+    for (int i = 0; i < 16 && pdata; ++i) {
+      const uint8_t* player = GuestPtr(base, pdata + uint32_t(i) * 0x578);
+      if (player[0] == 0 && player[1] == 0) continue;
+      const uint32_t handle = LoadBE32(player + 0x28);
+      if (handle == 0xFFFFFFFFu || handle == 0) continue;
+      const uint32_t object = LoadBE32(GuestPtr(base, elements + (handle & 0xFFFF) * 0x10 + 0xC));
+      std::memcpy(objects + used, player + 0x28, 4);
       if (object) std::memcpy(objects + used + 4, GuestPtr(base, object + 0x20), 12);
       used += 16;
     }

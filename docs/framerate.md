@@ -372,9 +372,11 @@ above). Not checked: grenades and other projectiles at range, vehicles, more tha
 
 **Now.** Campaign and Firefight co-op over the network (synchronous games, network type 2
 sync-client / 3 sync-server: every machine runs the same simulation tick for tick) run at
-30 ticks a second on every machine (`src/hooks/frame_rate.cpp`). A 60 fps machine keeps
-presenting 60 frames a second there, one tick every other frame (option (c) above: the camera
-and effects move every frame, objects every tick). Havok's collision tolerances are always
+30 ticks a second on every machine (`src/hooks/frame_rate.cpp`). A 60 fps machine ran one
+tick every other frame there, but until 2026-10-12 it presented only the frames with a tick,
+30 a second: the game does not draw a frame without a tick unless 25 ms have passed ("Frames
+without a tick", below). Now every frame is drawn (the camera's look and effects move every
+frame, objects every tick). Havok's collision tolerances are always
 computed for 1/30 s steps, so a 60 fps machine's co-op game is bit for bit the game of a
 30 fps machine. Players at 30 and 60 fps play co-op together, and the network gate is off
 ("Network games with different frame rates", above).
@@ -547,9 +549,35 @@ game once the tolerances matched.
 0037), so the game draws 120 or 144 frames a second. The simulation ticks at most 72 times a
 second, at a whole number of frames per tick: 60 ticks at 120 fps and 72 at 144, each tick
 shown for two frames (`src/hooks/frame_rate.cpp`, the display's rate divided by
-ceil(rate / 72); 60 fps keeps 60 ticks). Co-op over the network stays at 30 ticks.
-`REACH_TICK_RATE_MAX=0` gives the game's own rule back (one tick per frame, 144 at 144 fps),
-`=N` another limit.
+ceil(rate / 72); 60 fps keeps 60 ticks). Co-op over the network stays at 30 ticks. Every
+frame is drawn, also those without a tick ("Frames without a tick", below): the camera's look,
+aiming, effects and the HUD move at the full frame rate, objects and the camera's position on
+the ticks. `REACH_TICK_RATE_MAX=0` gives the game's own rule back (one tick per frame, 144 at
+144 fps), `=N` another limit; `REACH_RENDER_TICKLESS=0` draws only frames with a tick.
+
+### Frames without a tick
+
+The game does not draw a frame in which no tick ran, unless 25 ms have passed since the last
+drawn one. `sub_820E1B60` (from the main loop, `Main_FrameLoopStep`) hands the frame to the
+render thread only if one of the bits 0x3FFF of the frame's flags (`*(TLS + 0x80)`) is set; the
+game update `sub_82440410` sets bit 0 when ticks ran since the last drawn frame and, at its end,
+clears all flags when the frame took less than 25 ms and none of a few others (paused, a state
+change) is set. On the console every frame has a tick. With fewer ticks than frames only the
+frames with a tick were drawn: the main menu at 144 fps with 72 ticks presented 72.0 fps (p50
+13.7 ms, p99 14.8, clean run), and a 60 fps machine in co-op (30 ticks) presented 30, not 60
+as this document said before. The same check is why halving only the frame limiter left the
+screen at 30 fps ("How a frame is scheduled in vblanks", above).
+
+The hook on `sub_820E1B60` now sets bit 0x10 (no other user found) on such a frame when the
+game ticks less often than `frame_rate`, so every frame is drawn. A frame without a tick shows
+objects where the last tick left them; what changes is what the game updates every frame
+(player control and the camera's look, `sub_82442790`; effects, `sub_82208CC8`; the six
+`*(dt)` updates and the HUD). It is not interpolated: the Xbox 360 build has nothing that
+draws objects between two ticks (no reader of the game time's leftover tick fraction at +0x14,
+which the game time update writes). Checked with frame dumps of 120 consecutive presented
+frames: in SWAT at 144 fps turning with the right stick, every frame shows a new view (mean
+luma difference to the frame before 2.4-5.8, against 0.64 for two frames of a still view,
+the screen's noise); in the same game standing still, 144 frames a second.
 
 ### The design: 72 ticks, not 144, and no interpolation
 
@@ -601,9 +629,10 @@ Three ways to get 144 frames a second:
    (unsigned), close to the 2.1 s and 4.25 s that 60 fps has been played with.
 
 The third is the robust one: the simulation stays within the margins that 60 fps has been
-tested at, the frame rate is the full 144, and nothing new runs per tick. Its cost is that
-moving objects advance on every other frame at 144 (72 Hz motion, even cadence), not 144. An
-uneven 60 ticks at 144 fps (2 or 3 frames per tick) was not chosen for that reason.
+tested at, the frame rate is the full 144 (with the frames without a tick drawn, above), and
+nothing new runs per tick. Its cost is that moving objects advance on every other frame at
+144 (72 Hz motion, even cadence), not 144. An uneven 60 ticks at 144 fps (2 or 3 frames per
+tick) was not chosen for that reason.
 
 ### Fixes for rates above 60 (any tick rate)
 

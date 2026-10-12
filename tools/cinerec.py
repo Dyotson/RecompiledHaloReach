@@ -10,6 +10,9 @@ frames presented so far, the game time, the frame's ticks and blocks of thread g
   cinerec.py FILE steps [FIRST N]     per frame: how far the camera (observer +0x10) and each of the
                                       cinematic's objects (pseudo block 0xFFFF0000) moved since the
                                       frame before; 0.00 on every other line means 30 Hz motion
+  cinerec.py FILE view [FIRST N]      per frame: the camera's move and turn, and how each object's
+                                      angle off the camera's forward changed (judder against a
+                                      turning camera)
 """
 import struct
 import sys
@@ -77,6 +80,36 @@ def main():
                 moves = " ".join(f"{dist(cur[h], prev[1][h]):5.2f}" for h in list(cur)[:12] if h in prev[1])
                 print(f"time={r['time']} camera {dist(cam, prev[0]):5.2f} objects {moves}")
             prev = (cam, cur)
+    elif cmd == "view":
+        # Per main-loop frame: the frame's ticks, how far the camera moved and turned (observer
+        # +0x10 position, +0x1C forward), and for each recorded object the change of its
+        # direction as seen from the camera, relative to the camera's forward vector (degrees):
+        # with fewer ticks than frames, an object that moves only on ticks while the camera
+        # turns every frame shows up as an alternating step.
+        import math
+        first = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+        n = int(sys.argv[4]) if len(sys.argv) > 4 else 40
+        def vec(raw, at):
+            return struct.unpack_from(">3f", raw, at)
+        def sub(a, b): return tuple(x - y for x, y in zip(a, b))
+        def norm(a):
+            length = math.sqrt(sum(x * x for x in a)) or 1.0
+            return tuple(x / length for x in a)
+        def angle(a, b):
+            return math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(norm(a), norm(b)))))))
+        prev = None
+        for r in recs[first:first + n]:
+            obs = r["blocks"][0x354][1]
+            cam, fwd = vec(obs, 0x10), vec(obs, 0x1C)
+            objs = r["blocks"].get(0xFFFF0000, (0, b""))[1]
+            cur = {struct.unpack_from(">I", objs, i)[0]: vec(objs, i + 4) for i in range(0, len(objs), 16)}
+            # yaw/pitch of each object relative to the camera's forward
+            rel = {h: angle(sub(p, cam), fwd) for h, p in cur.items()}
+            if prev:
+                moved = math.dist(cam, prev[0]); turned = angle(fwd, prev[1])
+                cols = " ".join(f"{rel[h] - prev[2][h]:+6.3f}" for h in list(rel)[:6] if h in prev[2])
+                print(f"time={r['time']} ticks={r['ticks']} cam moved {moved:5.3f} turned {turned:6.3f} deg  objects (change of angle off forward, deg) {cols}")
+            prev = (cam, fwd, rel)
     elif cmd == "word":
         off, at = int(sys.argv[3], 0), int(sys.argv[4], 16)
         n = int(sys.argv[5]) if len(sys.argv) > 5 else 1

@@ -38,8 +38,8 @@
 //
 // Synchronous network games (campaign and Firefight co-op over System Link or Reach Live: every
 // machine runs the same simulation, tick for tick) run at 30 ticks a second on every machine,
-// whatever its frame rate: a 60 fps machine still presents 60 frames a second, one tick every
-// other frame, so players at 30 and 60 fps can play co-op together. The game globals' copy of
+// whatever its frame rate: a 60 fps machine runs one tick every other frame (and draws every
+// frame: "Frames without a tick", below), so players at 30 and 60 fps can play co-op together. The game globals' copy of
 // the game options' tick rate (+0x1C, round(refresh) / 2) is set to 30 right after the options
 // are copied in at game start (sub_82476568) and again before the game time takes it
 // (sub_8247B530). REACH_SYNC_TICKS30=0 keeps the display's rate in co-op (60/60 co-op at 60
@@ -62,6 +62,7 @@
 
 #include "../platform/guest_memory.h"
 
+#include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/ppc/context.h>
 #include <rex/ppc/func.h>
@@ -82,6 +83,9 @@ REX_EXTERN(__imp__sub_82476568);  // game start: copies the game options into th
 REX_EXTERN(__imp__sub_8247B530);  // game time init: tick rate from the game globals (+0x1C)
 REX_EXTERN(__imp__sub_8284FD70);  // hkpCollisionDispatcher::initCollisionQualityInfo(this, input)
 REX_EXTERN(__imp__sub_8246E5A8);  // cinematic_clips_initialize_for_shot(shot)
+REX_EXTERN(__imp__sub_820E1B60);  // main loop: hand the frame to the render thread if it is worth drawing
+
+REXCVAR_DECLARE(int32_t, frame_rate);
 
 namespace {
 
@@ -340,3 +344,40 @@ extern "C" REX_FUNC(sub_8284FD70) {
   __imp__sub_8284FD70(ctx, base);
   StoreBE32(input + 8, asked);
 }
+
+// --- Frames without a tick ----------------------------------------------------------------------
+//
+// sub_820E1B60 hands the main loop's frame to the render thread only if the frame's flags
+// (*(TLS + 0x80), set at the end of the game update sub_82440410) have one of the bits 0x3FFF
+// set. Bit 0 is "ticks ran since the last drawn frame"; at the end of the update all flags are
+// cleared when the frame took less than 25 ms and none of a few others (paused, a state change)
+// is set. So a frame without a tick is not drawn unless 25 ms have passed: at the console's 30
+// fps every frame has a tick, but with fewer ticks than frames (72 ticks at 144 fps, co-op's 30
+// ticks at 60 or 144 fps) only the frames with a tick were drawn, 72 or 30 a second. Here such a
+// frame gets bit 0x10 (no other user seen) when the game ticks less often than it draws, so
+// every frame is drawn: the camera's look, aiming, effects and the HUD, which update every
+// frame, move at the full frame rate; objects and the camera's position change on ticks only
+// (the frame without a tick shows them where the last tick left them: no interpolation).
+// REACH_RENDER_TICKLESS=0 turns this off.
+extern "C" REX_FUNC(sub_820E1B60) {
+  static const bool enabled = [] {
+    const char* v = std::getenv("REACH_RENDER_TICKLESS");
+    return !(v && *v == '0');
+  }();
+  if (enabled && REXCVAR_GET(frame_rate) > 30) {
+    const uint32_t tls = LoadBE32(GuestPtr(base, ctx.r13.u32));
+    const uint32_t frame_addr = LoadBE32(GuestPtr(base, tls + 0x80));
+    const uint32_t game_time = LoadBE32(GuestPtr(base, tls + 0x6C));
+    if (frame_addr && game_time) {
+      uint8_t* frame = GuestPtr(base, frame_addr);
+      const uint8_t* gt = GuestPtr(base, game_time);
+      const int tick_rate = int16_t(gt[4] << 8 | gt[5]);
+      const uint32_t flags = LoadBE32(frame);
+      if ((flags & 0x3FFF) == 0 && tick_rate > 0 && tick_rate < REXCVAR_GET(frame_rate)) {
+        StoreBE32(frame, flags | 0x10);
+      }
+    }
+  }
+  __imp__sub_820E1B60(ctx, base);
+}
+

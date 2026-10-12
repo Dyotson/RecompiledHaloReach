@@ -187,12 +187,15 @@ if [ "$SCENARIO" = gameplay ]; then
     select_row lobby 3 || fail "START GAME not selectable"
     cp "$DIR/last.png" "$DIR/lobby.png"
     step 5 A
-    # In play once the lobby is gone and the screen shows the world (not a black load).
-    end=$((SECONDS + 300)); seen=0
+    # In play once the lobby is gone and the screen shows the world (not a black load). The
+    # main menu's marker test can fire on the HUD (a bright column where the marker would be),
+    # so after 40 s without the lobby a bright screen counts even then.
+    end=$((SECONDS + 300)); seen=0; gone=0
     while [ $SECONDS -lt $end ] && [ $seen -lt 2 ]; do
         sleep 3; step 0 || continue
         bright=$(python3 -c "from PIL import Image, ImageStat; print(int(ImageStat.Stat(Image.open('$DIR/last.png').convert('L')).mean[0]))")
-        if [ "$bright" -gt 15 ] && [ "$(state lobby)" = -1 ] && [ "$(state main)" = -1 ]; then
+        if [ "$(state lobby)" = -1 ]; then [ $gone = 0 ] && gone=$SECONDS; else gone=0; fi
+        if [ "$bright" -gt 15 ] && [ $gone != 0 ] && { [ "$(state main)" = -1 ] || [ $((SECONDS - gone)) -ge 40 ]; }; then
             seen=$((seen + 1))
         else
             seen=0

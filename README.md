@@ -150,7 +150,7 @@ tools/play.sh --resolution_scale=2   # render at 2304x1440 instead of 1152x720
   a second (game time stays real time). Checked in the campaign, Firefight, matchmaking and
   System Link ([`docs/framerate.md`](docs/framerate.md)). Online, players at 30 and 60 fps
   play together: co-op (campaign and Firefight) runs at 30 ticks a second on every machine,
-  still shown at 60 fps, and multiplayer lets each machine tick at its own rate.
+  drawn at the machine's frame rate (objects move on the ticks), and multiplayer lets each machine tick at its own rate.
   `frame_rate = 120` or `144` draws 120 or 144 frames a second; the simulation then runs 60
   or 72 ticks a second, each shown for two frames (the view, aiming and effects move every
   frame). 144 needs the runtime built with SDK patch 0037 (`tools/build_rexglue_sdk.sh`);
