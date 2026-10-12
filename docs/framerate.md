@@ -456,6 +456,18 @@ after the revert (tick rate 60)`, twice each, as before), then gameplay: out of 
 walking, turning and firing; guest 60.0 fps, p50 16.8 ms. The cinematic camera hook was not
 re-checked frame by frame (nothing it reads changed).
 
+**Not checked yet** (next steps for mixed play):
+- Campaign co-op at mixed rates (only Firefight was run), and co-op through Reach Live
+  instead of System Link (same game code, other transport).
+- Matchmaking at mixed rates since the gate came off (the search keys are equal again; before
+  the gate a 60/30 pair was matched within 40 s and played a whole game).
+- Mixed multiplayer beyond the short test: grenades and other projectiles at range, vehicles,
+  more than two players ("Mixed multiplayer", above).
+- How co-op looks on a 60 fps machine at 30 ticks (objects step at 30 Hz, the camera every
+  frame): a reason to try interpolation (option (b)).
+- What re-creates the Havok world every 5-10 s (`sub_8251E738` ← `sub_8251C8B0` ←
+  `sub_824DD998`); harmless here, since every creation restores the same tolerances.
+
 **Earlier runs** (2026-10-11, before the cause was known; System Link Firefight, Overlook, two
 idle players, 60 fps host with 30 ticks forced, 30 fps client, gate off): both ran 30 ticks
 with their game times in step and still got "An error occurred while playing co-op" after
